@@ -27,6 +27,7 @@ class GodQuantConfig:
     llm_temperature: float = 0.3
     llm_max_tokens: int = 2000
     llm_timeout: int = 60
+    llm_fallbacks: list = field(default_factory=list)  # e.g. ["huggingface","pollinations"]
     # --- Quant ---
     default_symbol: str = "BTCUSDT"
     data_source: str = "auto"           # auto|binance|stooq|yfinance|synthetic
@@ -85,6 +86,10 @@ _ENV_MAP = {
     "GQ_PERSONA": "persona",
     "GQ_PORT": "server_port",
     "GQ_MODEL_PATH": "model_path",
+    "GQ_FALLBACKS": "llm_fallbacks",
+    "GQ_PROACTIVE": "proactive_interval",
+    "GQ_NUDGE_AFTER": "nudge_after",
+    "GQ_QUIET": "quiet_hours",
     "OPENAI_API_KEY": "llm_api_key",
     "GROQ_API_KEY": "llm_api_key",
     "ANTHROPIC_API_KEY": "llm_api_key",
@@ -106,6 +111,8 @@ def _coerce(field_name: str, value: str):
         return int(value)
     if field_name in floats:
         return float(value)
+    if field_name == "llm_fallbacks":
+        return [x.strip().lower() for x in value.split(",") if x.strip()]
     return value
 
 
@@ -129,7 +136,8 @@ def load_config(cli_overrides: dict | None = None) -> GodQuantConfig:
     # provider-specific key fallback
     if not cfg.llm_api_key:
         for k in ("OPENAI_API_KEY", "GROQ_API_KEY", "ANTHROPIC_API_KEY",
-                  "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"):
+                  "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY",
+                  "HF_TOKEN", "HUGGINGFACE_HUB_TOKEN"):
             if os.getenv(k):
                 cfg.llm_api_key = os.environ[k]
                 break

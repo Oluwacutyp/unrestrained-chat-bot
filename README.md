@@ -24,18 +24,22 @@ python bot.py --offline partner "hey babe i miss you" --persona alex
 ```
 
 Zero mandatory pip packages — works with no API key (offline voice + real tools).
-One free key unlocks full personality depth:
+**Phone-only? Start here:** full step-by-step → [`docs/TERMUX_GUIDE.md`](docs/TERMUX_GUIDE.md)
+— or just run the wizard: `python bot.py setup` (keys, persona, Telegram, live test).
+
+Brains (free tiers, auto-chained with fallback — if one dies, the next answers):
+
+| Provider | Key | Uncensored path |
+|---|---|---|
+| `groq` (default pick) | `GROQ_API_KEY` (`gsk_...`, free, no card) | great roleplay via system prompt |
+| `huggingface` | `HF_TOKEN` (free, needs "Inference Providers" perm) | any HF model via `GQ_MODEL`, incl. community uncensored |
+| `pollinations` | **none** — works out of the box | free `/models` list, try several |
+| local GGUF | none (after download) | `pkg install llama-cpp` + Dolphin/etc → `GQ_BASE_URL=http://127.0.0.1:8080/v1` |
+| `openai/anthropic/gemini/deepseek/openrouter/ollama/llamacpp` | their keys | as usual |
 
 ```bash
-export GQ_API_KEY=gsk_...   # Groq free tier (recommended for phones)
-# or OPENAI / ANTHROPIC / GEMINI / DEEPSEEK keys, or GQ_PROVIDER=ollama / llamacpp
-```
-
-Prefer **fully local + uncensored**? Point it at a GGUF (Dolphin, etc.):
-
-```bash
-python bot.py models --download qwen2.5-0.5b-q4   # phone-size; bigger on PC
-GQ_PROVIDER=llamacpp python bot.py partner "hey"
+export GQ_FALLBACKS=huggingface,pollinations   # groq → hf → pollinations → offline
+python bot.py doctor                            # see keys + live llm_chain
 ```
 
 ## ✉️ Messaging: WhatsApp + Telegram (own account)

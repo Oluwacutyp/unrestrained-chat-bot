@@ -1,10 +1,18 @@
-"""LLM router: primary provider + graceful fallback chain + cost logging."""
+"""LLM router: ordered fallback chain across MANY providers + cost logging.
+
+Chain = primary + cfg.llm_fallbacks + heuristic-always-last.
+Each link resolves its OWN key from env (GROQ_API_KEY, HF_TOKEN, ...),
+so one dead/slow/rate-limited provider never kills the bot — the next
+link answers. Example: groq → huggingface → pollinations → heuristic.
+"""
 from __future__ import annotations
 
+import copy
 import logging
 import time
 
-from godquant.llm.providers import LLMResponse, detect_provider, get_provider
+from godquant.llm.providers import (LLMResponse, detect_provider, get_provider,
+                                    key_for)
 
 log = logging.getLogger("godquant.llm")
 
@@ -24,29 +32,52 @@ class LLMRouter:
         self.memory = memory
         self.primary = detect_provider(cfg)
 
+    def chain(self) -> list[str]:
+        kinds = [self.primary]
+        for f in (self.cfg.llm_fallbacks or []):
+            f = str(f).strip().lower()
+            if f and f not in kinds:
+                kinds.append(f)
+        if "heuristic" not in kinds:
+            kinds.append("heuristic")  # always-last safety net, never fails
+        return kinds
+
+    def _build(self, kind: str):
+        if kind == "heuristic":
+            from godquant.llm.providers import HeuristicProvider
+            return HeuristicProvider()
+        cfg2 = copy.copy(self.cfg)
+        cfg2.llm_provider = kind
+        if kind != self.primary:
+            cfg2.llm_model = ""  # fallbacks use their own sane defaults
+        cfg2.llm_api_key = key_for(kind, self.cfg)
+        return get_provider(cfg2)
+
     def _estimate_cost(self, resp: LLMResponse) -> float:
         pin, pout = PRICES_PER_1K.get(resp.model, (0.0, 0.0))
         return (resp.prompt_tokens / 1000) * pin + (resp.completion_tokens / 1000) * pout
 
     def complete(self, system: str, user: str, agent: str = "core") -> LLMResponse:
-        provider = get_provider(self.cfg)
-        t0 = time.time()
-        try:
-            resp = provider.complete(system, user)
-        except Exception as e:
-            log.warning("primary LLM %s failed: %s — falling back to heuristic",
-                        self.primary, e)
-            if self.primary == "heuristic":
-                raise
-            from godquant.llm.providers import HeuristicProvider
-            resp = HeuristicProvider().complete(system, user)
-        resp.cost_usd = self._estimate_cost(resp)
-        latency = time.time() - t0
-        if self.memory is not None:
+        last_err: Exception | None = None
+        for kind in self.chain():
             try:
-                self.memory.log_cost(agent, resp.provider, resp.model,
-                                     resp.prompt_tokens, resp.completion_tokens,
-                                     resp.cost_usd, latency)
-            except Exception:
-                pass
-        return resp
+                provider = self._build(kind)
+                t0 = time.time()
+                resp = provider.complete(system, user)
+                resp.cost_usd = self._estimate_cost(resp)
+                if self.memory is not None:
+                    try:
+                        self.memory.log_cost(agent, resp.provider, resp.model,
+                                             resp.prompt_tokens,
+                                             resp.completion_tokens,
+                                             resp.cost_usd, time.time() - t0)
+                    except Exception:
+                        pass
+                if kind != self.primary:
+                    log.info("LLM answered via fallback: %s", kind)
+                return resp
+            except Exception as e:
+                last_err = e
+                log.warning("LLM %s failed, trying next: %s", kind, str(e)[:150])
+        # unreachable in practice (heuristic never raises) — satisfy types
+        raise RuntimeError(f"all LLM providers failed: {last_err}")

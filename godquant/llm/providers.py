@@ -69,16 +69,19 @@ class OpenAICompatibleProvider(BaseProvider):
         "groq": ("https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
         "deepseek": ("https://api.deepseek.com/v1", "deepseek-chat"),
         "openrouter": ("https://openrouter.ai/api/v1", "meta-llama/llama-3.3-70b-instruct"),
+        "huggingface": ("https://router.huggingface.co/v1", "Qwen/Qwen2.5-7B-Instruct"),
+        "pollinations": ("https://text.pollinations.ai/openai", "openai"),
         "ollama": ("http://localhost:11434/v1", "llama3.1"),
         "together": ("https://api.together.xyz/v1", "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
     }
 
     def __init__(self, provider: str = "openai", **kw):
+        passed_model = kw.get("model", "")
         super().__init__(**kw)
         self.provider_kind = provider
         if not self.base_url or self.base_url in ("auto", ""):
             self.base_url = self.PROVIDER_DEFAULTS.get(provider, (self.PROVIDER_DEFAULTS["openai"][0], ""))[0]
-        if not self.model:
+        if not passed_model:  # check what was PASSED (base fills class default)
             self.model = self.PROVIDER_DEFAULTS.get(provider, ("", self.default_model))[1]
         self.name = provider
 
@@ -311,6 +314,27 @@ class HeuristicProvider(BaseProvider):
         )
 
 
+def key_for(kind: str, cfg=None) -> str:
+    """Resolve the API key for a provider kind: own env var → cfg key → ''."""
+    env_vars = {
+        "openai": ["OPENAI_API_KEY"],
+        "groq": ["GROQ_API_KEY"],
+        "deepseek": ["DEEPSEEK_API_KEY"],
+        "openrouter": ["OPENROUTER_API_KEY"],
+        "together": ["TOGETHER_API_KEY"],
+        "anthropic": ["ANTHROPIC_API_KEY"],
+        "gemini": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        "huggingface": ["HF_TOKEN", "HUGGINGFACE_HUB_TOKEN"],
+        "hf": ["HF_TOKEN", "HUGGINGFACE_HUB_TOKEN"],
+    }
+    for var in env_vars.get(kind, []):
+        if os.environ.get(var):
+            return os.environ[var]
+    if cfg is not None and getattr(cfg, "llm_api_key", ""):
+        return cfg.llm_api_key
+    return ""
+
+
 def detect_provider(cfg) -> str:
     """Resolve 'auto' → concrete provider based on env/keys."""
     if cfg.offline:
@@ -318,22 +342,32 @@ def detect_provider(cfg) -> str:
     if cfg.llm_provider != "auto":
         return cfg.llm_provider
     key = cfg.llm_api_key or ""
-    if not key:
-        # keyless options first
-        if os.environ.get("OLLAMA_HOST"):
-            return "ollama"
-        return "heuristic"
-    # guess from key shape / explicit env
-    if os.environ.get("ANTHROPIC_API_KEY") and key.startswith("sk-ant"):
-        return "anthropic"
-    if os.environ.get("GEMINI_API_KEY") or key.startswith("AIza"):
-        return "gemini"
-    if os.environ.get("GROQ_API_KEY") or key.startswith("gsk_"):
+    # explicit env vars win (even when cfg key is empty — setup wizard flow)
+    if os.environ.get("GROQ_API_KEY"):
         return "groq"
+    if os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN"):
+        return "huggingface"
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+        return "gemini"
     if os.environ.get("DEEPSEEK_API_KEY"):
         return "deepseek"
     if os.environ.get("OPENROUTER_API_KEY"):
         return "openrouter"
+    if not key:
+        if os.environ.get("OLLAMA_HOST"):
+            return "ollama"
+        return "heuristic"
+    # guess from key shape
+    if key.startswith("sk-ant"):
+        return "anthropic"
+    if key.startswith("AIza"):
+        return "gemini"
+    if key.startswith("gsk_"):
+        return "groq"
+    if key.startswith("hf_"):
+        return "huggingface"
     return "openai"
 
 
@@ -358,6 +392,9 @@ def get_provider(cfg) -> BaseProvider:
                                 n_ctx=getattr(cfg, "llamacpp_ctx", 4096),
                                 n_threads=getattr(cfg, "llamacpp_threads", 4),
                                 **kw)
-    if kind in ("openai", "groq", "deepseek", "openrouter", "together"):
+    if kind == "hf":
+        kind = "huggingface"
+    if kind in ("openai", "groq", "deepseek", "openrouter", "together",
+                "huggingface", "pollinations"):
         return OpenAICompatibleProvider(kind, **kw)
     return HeuristicProvider(**kw)

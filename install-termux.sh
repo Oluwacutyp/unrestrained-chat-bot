@@ -13,6 +13,10 @@ echo "— optional accelerators (safe to skip on low storage) —"
 $PY -m pip install requests rich pytest 2>/dev/null || echo "(skipped optionals — stdlib mode is fine)"
 echo "— telegram userbot (recommended: your own account, replies + texts first) —"
 $PY -m pip install telethon 2>/dev/null || echo "(skipped telethon — install later for the TG bridge)"
+if command -v pkg >/dev/null 2>&1; then
+  echo "— local GGUF engine (optional: fully offline + uncensored brain) —"
+  pkg install -y llama-cpp 2>/dev/null || echo "(skipped llama.cpp — run: pkg install llama-cpp)"
+fi
 mkdir -p ~/.godquant workspace tests
 $PY bot.py doctor
 echo ""

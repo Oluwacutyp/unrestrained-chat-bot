@@ -1,0 +1,10 @@
+{
+  "llm_provider": "groq",
+  "llm_model": "llama-3.3-70b-versatile",
+  "llm_api_key": "gsk_YOUR_KEY_HERE",
+  "default_symbol": "BTCUSDT",
+  "data_source": "auto",
+  "initial_cash": 10000.0,
+  "commission": 0.001,
+  "max_workers": 4
+}

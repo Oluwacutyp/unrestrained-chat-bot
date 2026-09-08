@@ -161,6 +161,67 @@ def cmd_test(args, cfg, memory, router, orch):
     say(f"\nexit={res['exit_code']} in {res['elapsed']:.1f}s")
 
 
+def cmd_serve(args, cfg, memory, router, orch):
+    from godquant.companion.companion import CompanionAgent
+    from godquant.companion.server import serve_forever
+    if args.port:
+        cfg.server_port = args.port
+    if args.host:
+        cfg.server_host = args.host
+    serve_forever(cfg, router, memory, orch, CompanionAgent(cfg, router, memory))
+
+
+def cmd_partner(args, cfg, memory, router, orch):
+    from godquant.companion.companion import CompanionAgent
+    from godquant.companion.personas import list_personas
+    companion = CompanionAgent(cfg, router, memory)
+    persona = args.persona or cfg.persona
+    cid = args.cid or "cli"
+    if args.message:
+        out = companion.chat(args.message, cid, persona=persona,
+                             use_search=args.search)
+        say(out["response"])
+        say(f"\n[{out['persona']} · {out['mood']} {out['mood_level']}/10]")
+        return
+    say(f"Partner chat ({persona}) — /exit /reset /mood /persona <name> /personas\n")
+    while True:
+        try:
+            msg = input("you › ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not msg:
+            continue
+        if msg in ("/exit", "/quit"):
+            break
+        if msg == "/reset":
+            companion.reset(cid)
+            say("(fresh start ✨)")
+            continue
+        if msg == "/mood":
+            say(str(companion.moods.snapshot(cid)))
+            continue
+        if msg == "/personas":
+            say(list_personas())
+            continue
+        if msg.startswith("/persona "):
+            persona = msg.split(None, 1)[1]
+            say(f"(persona → {persona})")
+            continue
+        out = companion.chat(msg, cid, persona=persona)
+        say(f"\n{out['persona']} [{out['mood']} {out['mood_level']}/10] › {out['response']}\n")
+
+
+def cmd_models(args, cfg, memory, router, orch):
+    from godquant.companion import local_llm as LL
+    if args.download:
+        path = LL.download_model(args.download)
+        say(f"✓ {path}\nSet it: python gq.py config --set model_path={path}")
+        say("Use it: GQ_PROVIDER=llamacpp python gq.py partner \"hey\"")
+    else:
+        say(LL.list_models())
+
+
 def cmd_doctor(args, cfg, memory, router, orch):
     import sqlite3
     checks = []
@@ -186,6 +247,15 @@ def cmd_doctor(args, cfg, memory, router, orch):
     checks.append(("memory_db", str(cfg.resolved_memory_db())))
     checks.append(("workspace", str(cfg.resolved_workspace())))
     checks.append(("agents", ", ".join(sorted(AGENTS))))
+    checks.append(("persona", cfg.persona))
+    try:
+        import llama_cpp  # type: ignore
+        checks.append(("llama-cpp", "installed (local GGUF ready)"))
+    except Exception:
+        checks.append(("llama-cpp", "missing (optional; cloud LLMs unaffected)"))
+    from godquant.companion.local_llm import MODELS_DIR
+    ggufs = list(MODELS_DIR.glob("*.gguf")) if MODELS_DIR.exists() else []
+    checks.append(("gguf_models", str(len(ggufs))))
     say("God Quant Doctor\n")
     for k, v in checks:
         say(f"  {k:<12} {v}")
@@ -259,6 +329,19 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", help="environment diagnostics")
     cc = sub.add_parser("config", help="view/set config")
     cc.add_argument("--set", default=None, help="key=value")
+
+    s = sub.add_parser("serve", help="start unified chat+quant server (WhatsApp-ready)")
+    s.add_argument("--host", default=None)
+    s.add_argument("--port", type=int, default=None)
+
+    pc = sub.add_parser("partner", help="chat with the AI partner (persona+mood+tools)")
+    pc.add_argument("message", nargs="?", help="single message (omit for REPL)")
+    pc.add_argument("--persona", default=None, help="alex|companion|realistic|quant")
+    pc.add_argument("--cid", default="cli")
+    pc.add_argument("--search", action="store_true")
+
+    md = sub.add_parser("models", help="list/download local GGUF models")
+    md.add_argument("--download", default=None)
     return p
 
 
@@ -266,7 +349,8 @@ _HANDLERS = {"chat": cmd_chat, "mission": cmd_mission, "build": cmd_build,
              "backtest": cmd_backtest, "optimize": cmd_optimize, "risk": cmd_risk,
              "review": cmd_review, "memory": cmd_memory, "report": cmd_report,
              "strategies": cmd_strategies, "test": cmd_test,
-             "doctor": cmd_doctor, "config": cmd_config}
+             "doctor": cmd_doctor, "config": cmd_config,
+             "serve": cmd_serve, "partner": cmd_partner, "models": cmd_models}
 
 
 def main(argv: list[str] | None = None):

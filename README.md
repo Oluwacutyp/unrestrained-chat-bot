@@ -1,12 +1,14 @@
 # ◈ God Quant AI Developer
 
-**Production-grade, self-improving, multi-agent quant + code system — built Termux-first.**
+**Production-grade, self-improving, multi-agent quant + AI Partner system — built Termux-first.**
 
 Zero mandatory dependencies (pure Python stdlib). Runs fully **offline** out of the box;
 add one free API key to unlock full LLM reasoning.
 
 ```
 python gq.py mission "design and backtest an RSI mean-reversion strategy on BTCUSDT"
+python gq.py partner "hey babe, backtest rsi_meanrev on BTCUSDT" --persona alex
+python gq.py serve   # unified chat+quant server → phone browser / WhatsApp
 ```
 
 ## ⚡ 60-second start (Termux)
@@ -112,16 +114,39 @@ python gq.py review --path workspace/
 4. `memory --search` / `report` show what the system has learned; `/lesson` and
    `--add` let you inject your own doctrine.
 
-## 🧩 Bringing your existing AI Partner code
+## 💕 Partner fusion (your bots, evolved)
 
-Drop your current codebase anywhere (e.g. `partner/`) and run:
+Your 6 original Partner sources were merged from `main`, reconstructed as runnable
+code in `partner_original/` (Flask + llama.cpp + whatsapp-web.js, PC-oriented),
+**and** re-engineered stdlib-only into `godquant/companion/`:
+
+| Original | Fusion |
+|---|---|
+| Companion Backend persona | `personas: companion` |
+| Alex identity + 12-mood engine | `personas: alex` + unified `MoodEngine` (now **persistent** across restarts) |
+| Realistic bot mood decay + summaries | merged into `MoodEngine` + history summaries |
+| Research features (news/wiki/fact-check) | `web_search.py` — **zero deps** (no `duckduckgo-search` needed), also grounds the ResearcherAgent |
+| 3× Flask apps | one stdlib `server.py` — `/chat /research /mood /mission /backtest /risk` + mobile chat UI |
+| `whatsapp.js` | `bridges/whatsapp.js` — same `/chat` contract + `!mission` mode, mood footers, env config |
+| Dolphin GGUF via llama.cpp | `GQ_PROVIDER=llamacpp` router provider + `models` downloader (phone-size Qwen GGUFs too) |
+| HF Spaces Gradio app | preserved in `partner_original/hf_app.py` |
 
 ```bash
-python gq.py review --path partner/     # audit it
-python gq.py mission "integrate partner/ into godquant as a new agent, keep tests green"
+# chat with Alex (persona + mood + quant tools) — offline OK
+python gq.py partner "hey babe, backtest sma_cross on BTCUSDT" --persona alex
+python gq.py partner --persona quant        # REPL as Quant Buddy
+
+# serve to your phone browser + WhatsApp (replaces all 3 Flask apps)
+python gq.py serve                           # → http://localhost:5000
+AI_SERVER_URL=http://localhost:5000 WA_PERSONA=alex node bridges/whatsapp.js
+
+# local GGUF brain instead of cloud (PC, or big-storage phones)
+python gq.py models --download qwen2.5-0.5b-q4
+GQ_PROVIDER=llamacpp python gq.py partner "hey"
 ```
 
-The coder + reviewer agents will refactor, wire, and regression-test it.
+Personas: `alex` (default) · `companion` · `realistic` · `quant`.
+Set default: `python gq.py config --set persona=quant`.
 
 ## ⚠️ Honest limits
 
@@ -136,9 +161,12 @@ The coder + reviewer agents will refactor, wire, and regression-test it.
 gq.py  install-termux.sh  requirements.txt  config.example.json
 godquant/
   config.py  llm/{providers,router,prompts}.py  memory/store.py
-  agents/{base,orchestrator,specialists}.py
+  agents/{base,orchestrator,specialists}.py     # 7 agents incl. companion
   quant/{indicators,data,backtest,strategies,risk}.py
+  companion/{personas,mood,web_search,local_llm,companion,server}.py
   dev/{sandbox,patcher}.py  self_improve/evolver.py  ui/cli.py
+partner_original/   # your 6 reconstructed sources (PC stack)
+bridges/whatsapp.js # WhatsApp → God Quant server
 tests/  workspace/
 ```
 

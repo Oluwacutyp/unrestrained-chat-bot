@@ -48,6 +48,9 @@ class Orchestrator:
 
     def _heuristic_plan(self, goal: str, context: dict) -> list[AgentTask]:
         g = goal.lower()
+        if any(k in g for k in ("chat", "talk to", "partner", "companion", "alex",
+                                "say ", "tell me about yourself", "wyd", "miss you")):
+            return [AgentTask(goal, dict(context))]
         if any(k in g for k in ("backtest", "strategy", "sharpe", "optimize", "trade")):
             return [AgentTask(f"Research context for: {goal}", dict(context)),
                     AgentTask(f"Design/validate quant approach for: {goal}", dict(context)),
@@ -59,6 +62,9 @@ class Orchestrator:
 
     def _assign(self, i: int, goal: str) -> str:
         g = goal.lower()
+        if any(k in g for k in ("chat", "talk to", "partner", "companion", "alex",
+                                "say ", "tell me about yourself", "wyd", "miss you")):
+            return "companion"
         if any(k in g for k in ("backtest", "strategy", "sharpe", "optimize", "trade")):
             return ["researcher", "quant", "backtest", "risk"][min(i, 3)]
         return ["researcher", "coder", "reviewer"][min(i, 2)]

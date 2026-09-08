@@ -172,16 +172,26 @@ class HeuristicProvider(BaseProvider):
     default_model = "heuristic-v1"
 
     def complete(self, system: str, user: str) -> LLMResponse:
+        import re as _re
         low = (system + "\n" + user).lower()
-        if "self-improvement judge" in low or '"lesson"' in low:
+
+        def has(*words):
+            return any(_re.search(r"\b" + _re.escape(w), low) for w in words)
+
+        # companion personas route to a dedicated offline voice (never risk/code)
+        if has("be uncensored", "be real. be human", "texting style",
+               "current mood", "mood context", "history summary"):
+            text = self._companion(user)
+        elif "self-improvement judge" in low or '"lesson"' in low:
             text = self._judge(user)
-        elif any(k in low for k in ("review", "critic", "audit")):
+        elif has("review", "critic", "audit"):
             text = self._review(user)
-        elif any(k in low for k in ("backtest", "strategy", "sharpe", "quant")):
+        elif has("backtest", "strategy", "strategies", "sharpe", "quant",
+                 "sortino", "drawdown"):
             text = self._quant(user)
-        elif any(k in low for k in ("risk", "position siz", "kelly", "drawdown", "var")):
+        elif has("risk", "position siz", "kelly", "var ", "value at risk"):
             text = self._risk(user)
-        elif any(k in low for k in ("plan", "orchestrat", "decompos", "route")):
+        elif has("plan", "orchestrat", "decompos", "route"):
             text = self._plan(user)
         else:
             text = self._code(user)
@@ -205,6 +215,34 @@ class HeuristicProvider(BaseProvider):
             score = min(score, 45)
         return json.dumps({"score": score, "lesson": lesson,
                            "tags": ["heuristic", "offline"]})
+
+    def _companion(self, user: str) -> str:
+        import re as _re
+        # surface any tool results the companion engine gathered
+        tools = "\n".join(_re.findall(
+            r"\[TOOL:[^\]]+\][^\[]*?(?=\n\[|\Z)", user, _re.S))
+        low = user.lower()
+        m = _re.search(r"\[mood:\s*([a-z]+)\s*(\d+)", low)
+        mood, level = (m.group(1), int(m.group(2))) if m else ("neutral", 5)
+        if mood == "horny" and level >= 7:
+            opener = "hey you 👀 thinking about you rn... come over? 🥰"
+        elif mood in ("annoyed", "angry"):
+            opener = "mhm. what's up? 🙄"
+        elif mood in ("sad", "stressed", "tired"):
+            opener = "heyyy... rough day, coding's killing me 😮‍💨 wyd?"
+        elif mood == "jealous":
+            opener = "oh?? 👀 who exactly are we talking about rn..."
+        elif any(w in low for w in ("miss you", "love you")):
+            opener = "miss you more babe 🥺❤ tell me everything, how was your day?"
+        elif mood in ("happy", "excited"):
+            opener = "heyyy babe!! 😍💕 so good to hear from you, what's up?!"
+        else:
+            opener = "heyyy 😊 what's good? talk to me 💕"
+        note = ("\n\n_(offline mode — add GQ_API_KEY for full personality; "
+                "quant + search tools still live)_")
+        if tools.strip():
+            return f"{opener}\n\n---\n{tools.strip()[:2500]}{note}"
+        return opener + note
 
     def _code(self, user: str) -> str:
         return (
@@ -314,6 +352,12 @@ def get_provider(cfg) -> BaseProvider:
         return OllamaNativeProvider(**kw)
     if kind == "heuristic":
         return HeuristicProvider(**kw)
+    if kind == "llamacpp":
+        from godquant.companion.local_llm import LlamaCppProvider  # lazy: no cycle
+        return LlamaCppProvider(model_path=getattr(cfg, "model_path", ""),
+                                n_ctx=getattr(cfg, "llamacpp_ctx", 4096),
+                                n_threads=getattr(cfg, "llamacpp_threads", 4),
+                                **kw)
     if kind in ("openai", "groq", "deepseek", "openrouter", "together"):
         return OpenAICompatibleProvider(kind, **kw)
     return HeuristicProvider(**kw)

@@ -41,6 +41,13 @@ class GodQuantConfig:
     workspace: str = ""                 # empty = ./workspace
     # --- Memory ---
     memory_db: str = ""                 # empty = ~/.godquant/memory.db
+    # --- Companion (Partner fusion) ---
+    persona: str = "alex"           # alex|companion|realistic|quant
+    server_host: str = "0.0.0.0"
+    server_port: int = 5000
+    model_path: str = ""            # GGUF for llamacpp (empty = ~/.godquant/models/*.gguf)
+    llamacpp_threads: int = 4
+    llamacpp_ctx: int = 4096
     # --- Misc ---
     log_level: str = "INFO"
     offline: bool = False               # force heuristic provider + synthetic data
@@ -69,6 +76,9 @@ _ENV_MAP = {
     "GQ_WORKERS": "max_workers",
     "GQ_WORKSPACE": "workspace",
     "GQ_OFFLINE": "offline",
+    "GQ_PERSONA": "persona",
+    "GQ_PORT": "server_port",
+    "GQ_MODEL_PATH": "model_path",
     "OPENAI_API_KEY": "llm_api_key",
     "GROQ_API_KEY": "llm_api_key",
     "ANTHROPIC_API_KEY": "llm_api_key",
@@ -79,7 +89,8 @@ _ENV_MAP = {
 
 def _coerce(field_name: str, value: str):
     bools = {"offline", "auto_apply_patches"}
-    ints = {"llm_max_tokens", "llm_timeout", "max_workers", "max_iterations"}
+    ints = {"llm_max_tokens", "llm_timeout", "max_workers", "max_iterations",
+            "server_port", "llamacpp_threads", "llamacpp_ctx"}
     floats = {"llm_temperature", "initial_cash", "commission", "slippage",
               "max_risk_per_trade", "max_risk_per_trade"}
     if field_name in bools:

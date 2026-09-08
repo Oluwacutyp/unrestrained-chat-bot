@@ -18,9 +18,15 @@ class ResearcherAgent(BaseAgent):
     name = "researcher"
     system_prompt = prompts.RESEARCHER
 
-
     def execute(self, task: AgentTask) -> AgentResult:
-        out = self.ask(task.instruction)
+        brief = task.instruction
+        if not self.cfg.offline:
+            try:
+                from godquant.companion import web_search as WS
+                brief += f"\n\n[LIVE WEB RESULTS — cite these]\n{WS.smart_search(task.instruction)[:2500]}"
+            except Exception:
+                pass
+        out = self.ask(brief)
         try:
             self.memory.add("fact", out[:2000], tags="research")
         except Exception:
@@ -174,6 +180,8 @@ class ReviewerAgent(BaseAgent):
                            artifacts={"verdict": verdict}, score=score)
 
 
+from godquant.companion.companion import CompanionAgent  # noqa: E402
+
 AGENTS = {
     "researcher": ResearcherAgent,
     "coder": CoderAgent,
@@ -181,4 +189,5 @@ AGENTS = {
     "backtest": BacktestAgent,
     "risk": RiskAgent,
     "reviewer": ReviewerAgent,
+    "companion": CompanionAgent,
 }

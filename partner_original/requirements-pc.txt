@@ -1,0 +1,11 @@
+# PC-only requirements for partner_original/ (NOT needed for God Quant core).
+# Termux users: skip this folder entirely — use godquant/companion/ instead.
+flask>=3.0
+flask-cors>=4.0
+llama-cpp-python>=0.2.0
+duckduckgo-search>=5.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+pillow>=10.0
+# Node side (whatsapp.js): npm install whatsapp-web.js qrcode-terminal axios
+# HF Spaces side (hf_app.py): gradio==4.44.0 huggingface-hub==0.25.0

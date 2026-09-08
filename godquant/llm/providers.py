@@ -35,8 +35,12 @@ def _http_post(url: str, payload: dict, headers: dict, timeout: int) -> dict:
     data = json.dumps(payload).encode()
     if _requests is not None:
         r = _requests.post(url, json=payload, headers=headers, timeout=timeout)
-        r.raise_for_status()
-        return r.json()
+        if r.status_code >= 400:
+            raise RuntimeError(f"LLM HTTP {r.status_code}: {r.text[:500]}")
+        try:
+            return r.json()
+        except Exception:
+            raise RuntimeError(f"LLM bad JSON ({r.status_code}): {r.text[:300]}")
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -70,7 +74,7 @@ class OpenAICompatibleProvider(BaseProvider):
 
     PROVIDER_DEFAULTS = {
         "openai": ("https://api.openai.com/v1", "gpt-4o-mini"),
-        "groq": ("https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
+        "groq": ("https://api.groq.com/openai/v1", "openai/gpt-oss-20b"),
         "deepseek": ("https://api.deepseek.com/v1", "deepseek-chat"),
         "openrouter": ("https://openrouter.ai/api/v1", "meta-llama/llama-3.3-70b-instruct"),
         "huggingface": ("https://router.huggingface.co/v1", "Qwen/Qwen2.5-7B-Instruct"),
@@ -109,6 +113,80 @@ class OpenAICompatibleProvider(BaseProvider):
         return LLMResponse(text=text.strip(), model=self.model, provider=self.name,
                            prompt_tokens=usage.get("prompt_tokens", 0),
                            completion_tokens=usage.get("completion_tokens", 0))
+
+
+class PollinationsProvider(OpenAICompatibleProvider):
+    """Pollinations: keyless free tier, but the free model set rotates.
+
+    Unless the user pins GQ_MODEL explicitly, the model is resolved live
+    from /models (cached 24h) preferring known-free text models — so a
+    "402 Payment Required" on a stale default heals itself.
+    """
+
+    MODELS_URL = "https://text.pollinations.ai/models"
+    FREE_PREFS = ["openai-fast", "openai-roblox", "nova-fast", "mistral",
+                  "deepseek", "qwen-coder", "kimi", "gemini-fast", "openai"]
+
+    def __init__(self, **kw):
+        self._explicit_model = bool(kw.get("model"))
+        super().__init__("pollinations", **kw)
+
+    @classmethod
+    def _cache_path(cls):
+        from godquant.config import base_dir
+        return base_dir() / "pollinations_models.json"
+
+    @classmethod
+    def _pick(cls, names: list[str]) -> str:
+        lower = {n.lower(): n for n in names if n}
+        for pref in cls.FREE_PREFS:
+            if pref in lower:
+                return lower[pref]
+            for key, orig in lower.items():
+                if key.startswith(pref + "-") or key.startswith(pref + "_"):
+                    return orig
+        return names[0] if names else ""
+
+    @classmethod
+    def resolve_free_model(cls) -> str:
+        import time as _t
+        cp = cls._cache_path()
+        try:
+            if cp.exists() and _t.time() - cp.stat().st_mtime < 86400:
+                pick = cls._pick(json.loads(cp.read_text()))
+                if pick:
+                    return pick
+        except Exception:
+            pass
+        try:
+            req = urllib.request.Request(
+                cls.MODELS_URL,
+                headers={"User-Agent": "godquant/3.1", "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                data = json.loads(r.read().decode())
+            if isinstance(data, dict):
+                data = data.get("models") or data.get("data") or []
+            names = [m.get("name", "") for m in data
+                     if isinstance(m, dict) and m.get("name")]
+            pick = cls._pick(names)
+            if pick:
+                try:
+                    cp.parent.mkdir(parents=True, exist_ok=True)
+                    cp.write_text(json.dumps(names))
+                except Exception:
+                    pass
+                return pick
+        except Exception:
+            pass
+        return "openai"
+
+    def complete(self, system: str, user: str) -> LLMResponse:
+        if not self._explicit_model:
+            try:
+                self.model = self.resolve_free_model()
+            except Exception:
+                pass
+        return super().complete(system, user)
 
 
 class AnthropicProvider(BaseProvider):
@@ -398,7 +476,9 @@ def get_provider(cfg) -> BaseProvider:
                                 **kw)
     if kind == "hf":
         kind = "huggingface"
+    if kind == "pollinations":
+        return PollinationsProvider(**kw)
     if kind in ("openai", "groq", "deepseek", "openrouter", "together",
-                "huggingface", "pollinations"):
+                "huggingface"):
         return OpenAICompatibleProvider(kind, **kw)
     return HeuristicProvider(**kw)

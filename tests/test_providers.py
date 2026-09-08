@@ -23,6 +23,52 @@ def test_hf_alias_and_factory():
     assert get_provider(cfg).base_url == "https://router.huggingface.co/v1"
 
 
+def test_groq_default_is_current():
+    assert OpenAICompatibleProvider("groq").model == "openai/gpt-oss-20b"
+
+
+def test_pollinations_pick_prefers_free():
+    from godquant.llm.providers import PollinationsProvider as P
+    assert P._pick(["openai", "mistral-small", "gpt-image"]) == "mistral-small"
+    assert P._pick(["openai"]) == "openai"
+    assert P._pick([]) == ""
+
+
+def test_pollinations_explicit_model_honored():
+    from godquant.llm.providers import PollinationsProvider as P
+    assert P(model="custom-x")._explicit_model is True
+    assert P()._explicit_model is False
+
+
+def test_pollinations_resolve_uses_cache(monkeypatch, tmp_path):
+    import json as _json
+    from godquant.llm.providers import PollinationsProvider as P
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cp = P._cache_path()
+    cp.parent.mkdir(parents=True, exist_ok=True)
+    cp.write_text(_json.dumps(["openai", "nova-fast"]))
+    assert P.resolve_free_model() == "nova-fast"
+
+
+def test_http_post_surfaces_body(monkeypatch):
+    import godquant.llm.providers as prov
+
+    class FakeResp:
+        status_code = 402
+        text = '{"error": "model requires pollen credits"}'
+
+    class FakeReq:
+        @staticmethod
+        def post(url, json=None, headers=None, timeout=None):
+            return FakeResp()
+
+    monkeypatch.setattr(prov, "_requests", FakeReq())
+    import pytest
+    with pytest.raises(RuntimeError) as e:
+        prov._http_post("http://x", {}, {}, 5)
+    assert "402" in str(e.value) and "pollen" in str(e.value)
+
+
 def test_key_resolution(monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "hf_abc")
     monkeypatch.setenv("GROQ_API_KEY", "gsk_abc")

@@ -103,7 +103,9 @@ def test_tick_skips_fresh_and_quiet():
     ob.upsert_contact("telegram", "8", "Fresh")  # just registered → not silent
     eng = ProactiveEngine(cfg, CompanionAgent(cfg, router, mem), ob)
     assert eng.tick() == []
-    cfg.quiet_hours = "0-23"  # quiet almost all day
+    from datetime import datetime as _dt
+    _h = _dt.now().hour  # window covering NOW → time-independent
+    cfg.quiet_hours = f"{(_h - 1) % 24}-{(_h + 1) % 24}"
     _backdate(cfg.resolved_memory_db(), "telegram", "8", inbound_ago=99999)
     assert eng.tick() == []
     ob.close()

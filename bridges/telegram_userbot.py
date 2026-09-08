@@ -15,6 +15,8 @@ Setup (one time):
 Env knobs:
   GQ_SERVER=http://127.0.0.1:5000  TG_ALLOW=12345,@friend (empty = all DMs)
   TG_GROUPS=0  TG_POLL=15  TG_PERSONA=alex  TG_PREFIX=.  TG_SEARCH=0
+  TG_CATCHUP=0 (1 = reply to unread DMs missed while offline, see below)
+  TG_CATCHUP_MINS=60  TG_CATCHUP_MAX=5
 """
 from __future__ import annotations
 
@@ -47,6 +49,7 @@ POLL = int(os.environ.get("TG_POLL", "15"))
 PERSONA = os.environ.get("TG_PERSONA", "")
 PREFIX = os.environ.get("TG_PREFIX", ".")
 SEARCH = os.environ.get("TG_SEARCH", "0") == "1"
+
 
 def _require_creds():
     if not API_ID or not API_HASH:
@@ -96,7 +99,7 @@ async def run_user_cmd(cmd: str, arg: str, sender_id: int) -> str | None:
         m = await api(f"/mood?conversation_id=tg:{sender_id}")
         return f"mood: {m.get('current')} ({m.get('level')}/10)"
     if cmd in ("persona",):
-        return "personas live server-side — ask your owner to set WA/TG_PERSONA 💕"
+        return "personas live server-side — ask your owner to set TG_PERSONA 💕"
     if cmd in ("search", "news", "wiki", "fact", "fact_check"):
         kind = {"search": "text", "fact": "fact_check"}.get(cmd, cmd)
         r = await api("/research", {"query": arg, "type": kind}, timeout=60)
@@ -145,79 +148,162 @@ async def run_owner_cmd(cmd: str, arg: str) -> str:
     return HELP
 
 
+# ---------- message handling (pure logic — unit-tested with fake events) ----------
+async def handle_owner_message(event) -> str | None:
+    """Your outgoing `PREFIXcmd` messages → owner command result (also replied)."""
+    text = (event.raw_text or "").strip()
+    if not text.startswith(PREFIX) or len(text) <= len(PREFIX):
+        return None
+    cmd, _, arg = text[len(PREFIX):].partition(" ")
+    try:
+        out = await run_owner_cmd(cmd.lower(), arg.strip())
+    except Exception as e:
+        out = f"owner cmd failed: {e}"
+    await event.reply(out[:4000])
+    return out
+
+
+async def handle_incoming(event, client, me) -> str | None:
+    """Someone texted your account → reply via the brain. Returns reply/None."""
+    if getattr(event, "is_group", False) or getattr(event, "is_channel", False):
+        if not GROUPS:
+            return None
+        text0 = event.raw_text or ""
+        mentioned = bool(me.username) and f"@{me.username}".lower() in text0.lower()
+        replied = False
+        if getattr(event, "is_reply", False):
+            try:
+                replied = (await event.get_reply_message()).sender_id == me.id
+            except Exception:
+                replied = False
+        if not (mentioned or replied):
+            return None
+    sender = await event.get_sender()
+    if getattr(sender, "bot", False):
+        return None
+    sid = event.sender_id
+    if not allowed(sid, getattr(sender, "username", None)):
+        print(f"⏭ ignored {sid}")
+        return None
+    text = (event.raw_text or "").strip()
+    if not text:
+        return None
+    name = getattr(sender, "first_name", None) or getattr(sender, "username", str(sid))
+    print(f"📨 {name} ({sid}): {text[:80]}")
+    try:
+        await api("/contacts", {"channel": "telegram", "chat_id": str(sid),
+                                "display": name}, timeout=15)
+        if text[:1] in ("!", "/") and len(text) > 1:  # contact commands
+            parts = text[1:].split(None, 1)
+            out = await run_user_cmd(parts[0].lower(),
+                                     parts[1] if len(parts) > 1 else "", sid)
+            if out:
+                await event.reply(out[:4000])
+                return out
+        async with client.action(event.chat_id, "typing"):
+            reply = await chat_reply(text, sid, name, use_search=SEARCH)
+        await event.reply(reply[:4000])
+        print("✓ replied")
+        return reply
+    except Exception as e:
+        log.warning("reply failed: %s", e)
+        try:
+            await event.reply("hey, something went wrong on my end 😔 try again?")
+        except Exception:
+            pass
+        return None
+
+
+async def deliver_outbox(client) -> list:
+    """One outbox pass: send everything pending for telegram. Returns sent-to list."""
+    sent = []
+    items = (await api("/outbox?channel=telegram", timeout=20)).get("pending", [])
+    for it in items:
+        try:
+            entity = int(it["to"]) if it["to"].lstrip("-").isdigit() else it["to"]
+            await client.send_message(entity, it["message"])
+            await api("/ack", {"id": it["id"], "ok": True}, timeout=15)
+            print(f"✉ sent → {it['to']}")
+            sent.append(it["to"])
+        except Exception as e:
+            log.warning("send → %s failed: %s", it["to"], e)
+            await api("/ack", {"id": it["id"], "ok": False}, timeout=15)
+    return sent
+
+
+async def catchup_unread(client, me) -> list:
+    """Opt-in (TG_CATCHUP=1): reply to unread DMs missed while offline.
+
+    Guards: DMs only, allowlist applies, bots skipped, only messages newer
+    than TG_CATCHUP_MINS, max TG_CATCHUP_MAX dialogs, replied ones marked read.
+    """
+    if os.environ.get("TG_CATCHUP", "0") != "1":
+        return []
+    from datetime import datetime, timedelta, timezone
+    max_age = timedelta(minutes=int(os.environ.get("TG_CATCHUP_MINS", "60")))
+    max_n = int(os.environ.get("TG_CATCHUP_MAX", "5"))
+    done, now = [], datetime.now(timezone.utc)
+    async for dialog in client.iter_dialogs(limit=50):
+        if len(done) >= max_n:
+            break
+        if getattr(dialog, "is_group", False) or getattr(dialog, "is_channel", False):
+            continue
+        if not (getattr(dialog, "unread_count", 0) or 0):
+            continue
+        try:
+            entity = await client.get_entity(dialog.id)
+        except Exception:
+            continue
+        if getattr(entity, "bot", False):
+            continue
+        if not allowed(entity.id, getattr(entity, "username", None)):
+            continue
+        try:
+            msgs = await client.get_messages(entity, limit=1)
+        except Exception:
+            continue
+        msg = msgs[0] if msgs else None
+        if msg is None or getattr(msg, "out", False):
+            continue
+        date = getattr(msg, "date", None)
+        if date is not None:
+            if date.tzinfo is None:
+                date = date.replace(tzinfo=timezone.utc)
+            if now - date > max_age:
+                continue
+        try:
+            out = await handle_incoming(msg, client, me)
+            await client.send_read_acknowledge(entity)
+            if out:
+                done.append(dialog.id)
+        except Exception as e:
+            log.warning("catchup %s: %s", dialog.id, e)
+    return done
+
+
 async def main():
+    _require_creds()
     client = TelegramClient(SESSION, API_ID, API_HASH)
     await client.start()  # interactive phone+code login on first run
     me = await client.get_me()
     print(f"✓ logged in as @{getattr(me, 'username', me.id)} ({me.id}) → {SERVER}")
 
-    # ---- owner commands: your own outgoing messages starting with PREFIX ----
-    @client.on(events.NewMessage(outgoing=True, pattern=rf"^{PREFIX}(\w+)\s*(.*)$"))
+    @client.on(events.NewMessage(outgoing=True))
     async def _(event):
-        cmd, arg = event.pattern_match.group(1).lower(), event.pattern_match.group(2)
-        try:
-            await event.reply(await run_owner_cmd(cmd, arg))
-        except Exception as e:
-            await event.reply(f"owner cmd failed: {e}")
+        await handle_owner_message(event)
 
-    # ---- incoming DMs ----
     @client.on(events.NewMessage(incoming=True))
     async def _(event):
-        if event.is_group or event.is_channel:
-            if not GROUPS:
-                return
-            mentioned = me.username and f"@{me.username}".lower() in (event.raw_text or "").lower()
-            replied = event.is_reply and (await event.get_reply_message()).sender_id == me.id
-            if not (mentioned or replied):
-                return
-        sender = await event.get_sender()
-        if getattr(sender, "bot", False):
-            return
-        sid = event.sender_id
-        if not allowed(sid, getattr(sender, "username", None)):
-            print(f"⏭ ignored {sid}")
-            return
-        text = (event.raw_text or "").strip()
-        if not text:
-            return
-        name = getattr(sender, "first_name", None) or getattr(sender, "username", str(sid))
-        print(f"📨 {name} ({sid}): {text[:80]}")
-        try:
-            await api("/contacts", {"channel": "telegram", "chat_id": str(sid),
-                                    "display": name}, timeout=15)
-            # !cmd or /cmd from contacts
-            if text[:1] in ("!", "/") and len(text) > 1:
-                parts = text[1:].split(None, 1)
-                out = await run_user_cmd(parts[0].lower(),
-                                         parts[1] if len(parts) > 1 else "", sid)
-                if out:
-                    await event.reply(out[:4000])
-                    return
-            async with client.action(event.chat_id, "typing"):
-                reply = await chat_reply(text, sid, name, use_search=SEARCH)
-            await event.reply(reply[:4000])
-            print("✓ replied")
-        except Exception as e:
-            log.warning("reply failed: %s", e)
-            try:
-                await event.reply("hey, something went wrong on my end 😔 try again?")
-            except Exception:
-                pass
+        await handle_incoming(event, client, me)
 
-    # ---- outbox delivery loop (bot texts first / texts itself) ----
+    caught = await catchup_unread(client, me)
+    if caught:
+        print(f"✓ catchup replied in {len(caught)} dialog(s)")
+
     async def outbox_loop():
         while True:
             try:
-                items = (await api("/outbox?channel=telegram", timeout=20)).get("pending", [])
-                for it in items:
-                    try:
-                        entity = int(it["to"]) if it["to"].lstrip("-").isdigit() else it["to"]
-                        await client.send_message(entity, it["message"])
-                        await api("/ack", {"id": it["id"], "ok": True}, timeout=15)
-                        print(f"✉ sent → {it['to']}")
-                    except Exception as e:
-                        log.warning("send → %s failed: %s", it["to"], e)
-                        await api("/ack", {"id": it["id"], "ok": False}, timeout=15)
+                await deliver_outbox(client)
             except Exception as e:
                 log.debug("outbox poll: %s", e)
             await asyncio.sleep(POLL)

@@ -34,6 +34,10 @@ python bridges/telegram_userbot.py               # first run: phone number + log
 - **DM commands** (contacts): `!reset` `!mood` `!search <q>` `!news <q>` `!wiki <q>` `!fact <q>`
 - **Text itself**: `.send me good morning ❤` lands in your Saved Messages.
   The proactive ticker texts silent contacts automatically (see below).
+- **Missed messages**: the userbot answers texts that arrive while it's running.
+  If it was offline, those aren't replayed — opt into catch-up replies with
+  `TG_CATCHUP=1` (only unread DMs < `TG_CATCHUP_MINS`=60 old, max
+  `TG_CATCHUP_MAX`=5 dialogs, allowlist + bot-filter still apply).
 - Termux: run inside `termux-wake-lock` / a Termux:Boot session to survive doze.
 
 ## WhatsApp — PC recommended (⚠️ Termux can't run Chrome)

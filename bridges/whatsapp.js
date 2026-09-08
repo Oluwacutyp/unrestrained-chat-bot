@@ -258,6 +258,36 @@ client.on('call', async (call) => {
     }
 });
 
+// Register a sighting so proactive texting + silence tracking work
+async function registerContact(chatId, display) {
+    try {
+        await axios.post(`${AI_SERVER_URL}/contacts`, {
+            channel: 'whatsapp', chat_id: chatId, display: display || ''
+        }, { timeout: 10000 });
+    } catch (e) { /* server will catch up later */ }
+}
+
+// Outbox delivery loop — this is how the bot TEXTS FIRST (incl. texting itself:
+// queue `to` = your own 1234@c.us chat id via POST /send or the proactive ticker)
+const OUTBOX_POLL = parseInt(process.env.WA_POLL || '15', 10) * 1000;
+async function pollOutbox() {
+    try {
+        const { data } = await axios.get(`${AI_SERVER_URL}/outbox?channel=whatsapp`, { timeout: 15000 });
+        for (const item of (data.pending || [])) {
+            try {
+                await client.sendMessage(item.to, item.message);
+                await axios.post(`${AI_SERVER_URL}/ack`, { id: item.id, ok: true }, { timeout: 10000 });
+                console.log(`✉ sent → ${item.to}`);
+            } catch (e) {
+                console.error(`send → ${item.to} failed:`, e.message);
+                try { await axios.post(`${AI_SERVER_URL}/ack`, { id: item.id, ok: false }); } catch (_) {}
+            }
+        }
+    } catch (e) { /* server down — retry next poll */ }
+    setTimeout(pollOutbox, OUTBOX_POLL);
+}
+client.on('ready', () => { setTimeout(pollOutbox, 5000); });
+
 // Initialize client
 console.log('🔄 Initializing WhatsApp client...');
 console.log('⏱ This may take 30-60 seconds...\n');

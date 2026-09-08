@@ -194,7 +194,7 @@ Open `http://127.0.0.1:5000` in your phone browser for the chat UI.
 | `SESSION expired / AuthKey` | delete `~/.godquant/tg_userbot.session*`, re-run, log in again |
 | `llama-server` OOM-killed | smaller model/quant, lower `-c 1024`, close other apps |
 | Termux killed overnight | battery Unrestricted + `termux-wake-lock`; check `logcat` |
-| Bot replies as you in groups | intended only for DMs; `TG_GROUPS=0` default ignores groups |
+| Bot replies as you in groups | `TG_GROUPS=1` enables mention-only group replies (v3.2); default ignores groups |
 | `PLAY STORE Termux` errors | reinstall from F-Droid — Play build is dead |
 
 ## 9. Security notes (read once)

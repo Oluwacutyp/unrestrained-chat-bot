@@ -1,8 +1,9 @@
 """CompanionAgent — the 7th agent. A Partner-bot soul with God Quant tools.
 
 Pipeline per message (mirrors the originals, upgraded):
-  mood.update → history+summary → auto tools (search/backtest/risk)
-  → persona render → LLM → persist → reply (+mood snapshot)
+  mood.update → bond.note (relationship) → history+summary
+  → auto tools (search/backtest/risk) → persona+relationship render
+  → LLM → persist → reply (+mood snapshot)
 
 Conversation history persists in the memory store (originals lost it on
 restart). Tools let the companion answer "how's BTC?" with REAL backtests.
@@ -16,6 +17,7 @@ from godquant.agents.base import AgentResult, AgentTask, BaseAgent
 from godquant.companion import web_search as WS
 from godquant.companion.mood import MoodEngine
 from godquant.companion.personas import get_persona, render_persona
+from godquant.companion.relationship import BondStore, addressing, parse_bond_id
 from godquant.llm import prompts
 from godquant.quant import risk as R
 from godquant.quant.backtest import run_backtest
@@ -30,6 +32,7 @@ class CompanionAgent(BaseAgent):
     def __init__(self, cfg, router, memory):
         super().__init__(cfg, router, memory)
         self.moods = MoodEngine(memory)
+        self.bonds = BondStore(cfg.resolved_memory_db())
 
     # ---------- history (persistent) ----------
     def _load_history(self, cid: str, limit: int = 20) -> list[dict]:
@@ -104,7 +107,8 @@ class CompanionAgent(BaseAgent):
     # ---------- main entry ----------
     def chat(self, message: str, cid: str = "default",
              persona: str | None = None, use_search: bool = False,
-             image_data: str | None = None) -> dict:
+             image_data: str | None = None, sender_name: str | None = None,
+             is_group: bool = False, bond_id: str | None = None) -> dict:
         persona = persona or self.cfg.persona
         get_persona(persona)  # validates, raises on unknown
 
@@ -112,6 +116,11 @@ class CompanionAgent(BaseAgent):
         mood_ctx = self.moods.context(cid)
         history = self._load_history(cid)
         summary = self.history_summary(history)
+
+        # relationship: closeness gates pet names (never "babe" for strangers)
+        bch, bwho = parse_bond_id(bond_id or cid)
+        bond = self.bonds.note_message(bch, bwho, message)
+        rel_block = addressing(bond["level"], sender_name or bwho, is_group)
 
         tool_ctx = self._maybe_tools(message)
         if use_search and "[TOOL:WEB]" not in tool_ctx:
@@ -127,6 +136,7 @@ class CompanionAgent(BaseAgent):
             system += self.memory.lesson_context(message)
         except Exception:
             pass
+        system += "\n" + rel_block
         convo = "\n".join(f"{'Them' if m['role'] == 'user' else 'You'}: {m['content'][:500]}"
                           for m in history[-8:])
         mood_tag = f"\n[MOOD: {mood_state.current} {mood_state.level}/10]"
@@ -134,9 +144,7 @@ class CompanionAgent(BaseAgent):
                       if convo else f"Them: {message}{image_ctx}{tool_ctx}{mood_tag}")
 
         sampling = self.moods.sampling(cid)
-        # temporarily bias router temperature toward mood (restored after)
-        router = self.router
-        text = router.complete(system, user_block, agent=self.name).text
+        text = self.router.complete(system, user_block, agent=self.name).text
 
         self._save_msg(cid, "user", message)
         self._save_msg(cid, "assistant", text)
@@ -144,18 +152,24 @@ class CompanionAgent(BaseAgent):
                 "mood": mood_state.current,
                 "mood_level": mood_state.level,
                 "persona": persona,
-                "sampling": sampling}
+                "sampling": sampling,
+                "bond": bond["level"],
+                "bond_count": bond["count"]}
 
     def proactive_opener(self, cid: str, persona: str | None = None,
-                         silence_s: int = 3600) -> str:
+                         silence_s: int = 3600, display: str | None = None) -> str:
         """Generate a TEXT-FIRST opener (they've been silent). Saved as our msg."""
         persona = persona or self.cfg.persona
         get_persona(persona)
         mood_ctx = self.moods.context(cid)
         history = self._load_history(cid)
         summary = self.history_summary(history)
+        bch, bwho = parse_bond_id(cid)
+        bond = self.bonds.get(bch, bwho)
+        rel_block = addressing(bond["level"], display or bwho, False)
         system = render_persona(persona, mood_context=mood_ctx,
                                 history_summary=summary)
+        system += "\n" + rel_block
         hrs = silence_s / 3600
         if hrs < 1.5:
             situ = "They went quiet ~an hour ago. Send ONE short check-in text."
@@ -190,6 +204,9 @@ class CompanionAgent(BaseAgent):
                         cid=ctx.get("conversation_id", "default"),
                         persona=ctx.get("persona"),
                         use_search=ctx.get("use_search", False),
-                        image_data=ctx.get("image"))
+                        image_data=ctx.get("image"),
+                        sender_name=ctx.get("sender_name"),
+                        is_group=ctx.get("is_group", False),
+                        bond_id=ctx.get("bond_id"))
         return AgentResult(agent=self.name, ok=True, output=out["response"],
                            artifacts=out)

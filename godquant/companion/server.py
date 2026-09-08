@@ -15,6 +15,7 @@ API is backward compatible with whatsapp.js:
   GET  /outbox?channel=  → pending outbound for bridges (+ POST /ack {id,ok})
   GET|POST /contacts     → proactive-texting registry
   POST /tick             → run proactive pass now
+  GET|POST /bond         → relationship level (get / owner-pin 0-3)
 GET / serves the single-file chat UI (mobile-first, Termux-friendly).
 """
 from __future__ import annotations
@@ -146,6 +147,14 @@ class _Handler(BaseHTTPRequestHandler):
             with self.lock:
                 return self._json({"contacts": self.outbox.list_contacts(),
                                    **self.outbox.stats()})
+        if parsed.path == "/bond":
+            channel = q.get("channel", ["telegram"])[0]
+            chat_id = q.get("chat_id", [""])[0]
+            if not chat_id:
+                return self._json({"error": "need chat_id"}, 400)
+            _, _, _, _, companion = self.stack
+            with self.lock:
+                return self._json({"bond": companion.bonds.get(channel, chat_id)})
         return self._json({"error": "not found"}, 404)
 
     def do_POST(self):
@@ -162,10 +171,14 @@ class _Handler(BaseHTTPRequestHandler):
                         self.outbox.upsert_contact(data["channel"], str(data["chat_id"]),
                                                    data.get("display", ""),
                                                    touch_inbound=True)
-                    out = companion.chat(msg, cid,
-                                         persona=data.get("persona"),
-                                         use_search=data.get("use_search", False),
-                                         image_data=data.get("image"))
+                    out = companion.chat(
+                        msg, cid,
+                        persona=data.get("persona"),
+                        use_search=data.get("use_search", False),
+                        image_data=data.get("image"),
+                        sender_name=data.get("sender_name"),
+                        is_group=bool(data.get("is_group")),
+                        bond_id=data.get("bond_id"))
                 return self._json({**out, "conversation_id": cid})
             if path == "/send":
                 if not data.get("message") or not data.get("to"):
@@ -179,6 +192,19 @@ class _Handler(BaseHTTPRequestHandler):
                     self.outbox.ack(int(data.get("id", 0)),
                                     bool(data.get("ok", True)))
                 return self._json({"ok": True})
+            if path == "/bond":
+                ch, chat_id = data.get("channel", "telegram"), data.get("chat_id", "")
+                if not chat_id:
+                    return self._json({"error": "need {chat_id, level}"}, 400)
+                try:
+                    n = int(data.get("level"))
+                except (TypeError, ValueError):
+                    return self._json({"error": "need level 0-3"}, 400)
+                if n not in (0, 1, 2, 3):
+                    return self._json({"error": "need level 0-3"}, 400)
+                with self.lock:
+                    bond = companion.bonds.set_level(ch, str(chat_id), n)
+                return self._json({"bond": bond})
             if path == "/contacts":
                 ch, chat_id = data.get("channel"), data.get("chat_id")
                 if not ch or not chat_id:
@@ -258,8 +284,10 @@ def create_server(cfg, router, memory, orch, companion,
     _Handler.stack = (cfg, router, memory, orch, companion)
     _Handler.outbox = Outbox(cfg.resolved_memory_db())
     _Handler.engine = ProactiveEngine(cfg, companion, _Handler.outbox)
-    srv = ThreadingHTTPServer((host or cfg.server_host, port or cfg.server_port),
-                              _Handler)
+    srv = ThreadingHTTPServer(
+        (host or cfg.server_host,
+         port if port is not None else cfg.server_port),
+        _Handler)
     srv.daemon_threads = True
     return srv
 

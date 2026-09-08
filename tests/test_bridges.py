@@ -123,8 +123,10 @@ def test_dm_gets_brain_reply(monkeypatch):
     mod = _load_bridge()
     mod.ALLOW.clear()
 
-    async def fake_chat(text, sid, display, use_search=False):
+    async def fake_chat(text, sid, display, use_search=False,
+                        chat_id=None, is_group=False):
         assert sid == 42 and "hey" in text
+        assert chat_id == sid and is_group is False  # DM: context == sender
         return "heeey babe!! 😍"
 
     async def fake_api(path, payload=None, timeout=120):
@@ -177,8 +179,11 @@ def test_group_mention_replies_when_enabled(monkeypatch):
     mod = _load_bridge()
     mod.ALLOW.clear()
     monkeypatch.setattr(mod, "GROUPS", True)
-    monkeypatch.setattr(mod, "chat_reply",
-                        lambda t, s, d, use_search=False: asyncio.sleep(0, "yo 👀"))
+    async def fake_group_chat(t, s, d, use_search=False,
+                              chat_id=None, is_group=False):
+        assert chat_id == -100 and is_group is True  # group: shared context
+        return "yo 👀"
+    monkeypatch.setattr(mod, "chat_reply", fake_group_chat)
 
     async def fake_api(path, payload=None, timeout=120):
         return {}
@@ -233,7 +238,7 @@ def test_catchup_replies_to_fresh_unread_only(monkeypatch):
     monkeypatch.setenv("TG_CATCHUP_MINS", "60")
     monkeypatch.setenv("TG_CATCHUP_MAX", "5")
     monkeypatch.setattr(mod, "chat_reply",
-                        lambda t, s, d, use_search=False: asyncio.sleep(0, "back! ❤"))
+                        lambda t, s, d, **kw: asyncio.sleep(0, "back! ❤"))
 
     async def fake_api(path, payload=None, timeout=120):
         return {}

@@ -17,6 +17,8 @@ Env knobs:
   TG_GROUPS=0  TG_POLL=15  TG_PERSONA=alex  TG_PREFIX=.  TG_SEARCH=0
   TG_CATCHUP=0 (1 = reply to unread DMs missed while offline, see below)
   TG_CATCHUP_MINS=60  TG_CATCHUP_MAX=5
+  TG_HUMANIZE=1 (0 = instant sends, no typing performance)
+  HUMAN_WPM=45 HUMAN_MAXPM=20 HUMAN_GAP=4 (humanizer tuning)
 """
 from __future__ import annotations
 
@@ -28,6 +30,8 @@ import sys
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("tg-userbot")
 
@@ -36,6 +40,10 @@ try:
     TELETHON_OK = True
 except ImportError:
     TELETHON_OK = False
+
+from godquant.companion.humanize import (RateLimiter, asleep, bubble_gap,
+                                        read_delay, split_bubbles,
+                                        typing_delay)
 
 API_ID = int(os.environ.get("TG_API_ID", "0") or 0)
 API_HASH = os.environ.get("TG_API_HASH", "")
@@ -49,6 +57,11 @@ POLL = int(os.environ.get("TG_POLL", "15"))
 PERSONA = os.environ.get("TG_PERSONA", "")
 PREFIX = os.environ.get("TG_PREFIX", ".")
 SEARCH = os.environ.get("TG_SEARCH", "0") == "1"
+HUMANIZE = os.environ.get("TG_HUMANIZE", "1") == "1"
+HUMAN_WPM = int(os.environ.get("HUMAN_WPM", "45"))
+
+limiter = RateLimiter(max_per_min=int(os.environ.get("HUMAN_MAXPM", "20")),
+                      min_chat_gap=float(os.environ.get("HUMAN_GAP", "4")))
 
 
 def _require_creds():
@@ -81,13 +94,62 @@ def allowed(sender_id: int, username: str | None) -> bool:
 
 
 async def chat_reply(text: str, sender_id: int, display: str,
-                     use_search: bool = False) -> str:
+                     use_search: bool = False, chat_id=None,
+                     is_group: bool = False) -> str:
+    """Ask the brain. Group chats share one context; bonds stay per-sender."""
+    chat = str(chat_id) if chat_id is not None else str(sender_id)
     data = await api("/chat", {
-        "message": text, "conversation_id": f"tg:{sender_id}",
-        "channel": "telegram", "chat_id": str(sender_id), "display": display,
+        "message": text, "conversation_id": f"tg:{chat}",
+        "channel": "telegram", "chat_id": chat, "display": display,
+        "sender_name": display, "is_group": is_group,
+        "bond_id": f"telegram:{sender_id}",
         "persona": PERSONA or None, "use_search": use_search}, timeout=180)
-    mood = f"\n_{data.get('mood', '')} {data.get('mood_level', '')}_".strip()
-    return (data.get("response") or "(no reply 😅)") + (f"\n{mood}" if data.get("mood") else "")
+    # NOTE: mood footer deliberately NOT appended — replies stay clean.
+    return data.get("response") or "(no reply 😅)"
+
+
+async def human_send_reply(event, client, text: str):
+    """Reply like a human: read pause → typing scaled to length → bubbles."""
+    bubbles = split_bubbles(text)
+    chat = "tg:%s" % getattr(event, "chat_id", "?")
+    if not HUMANIZE:
+        for b in bubbles:
+            await limiter.wait(chat)
+            await event.reply(b[:4000])
+        return
+    await asleep(read_delay(len(text)))
+    for i, b in enumerate(bubbles):
+        if i:
+            await asleep(bubble_gap())
+        await limiter.wait(chat)
+        try:
+            async with client.action(event.chat_id, "typing"):
+                await asleep(typing_delay(len(b), wpm=HUMAN_WPM))
+        except Exception:
+            await asleep(typing_delay(b))
+        await event.reply(b[:4000])
+
+
+async def human_send_message(client, entity, text: str):
+    """Outbound variant of human_send_reply (no event to reply to)."""
+    bubbles = split_bubbles(text)
+    key = "tg:%s" % entity
+    if not HUMANIZE:
+        for b in bubbles:
+            await limiter.wait(key)
+            await client.send_message(entity, b[:4000])
+        return
+    await asleep(read_delay(len(text)))
+    for i, b in enumerate(bubbles):
+        if i:
+            await asleep(bubble_gap())
+        await limiter.wait(key)
+        try:
+            async with client.action(entity, "typing"):
+                await asleep(typing_delay(len(b), wpm=HUMAN_WPM))
+        except Exception:
+            await asleep(typing_delay(b))
+        await client.send_message(entity, b[:4000])
 
 
 # user-facing DM commands (anyone allowed)
@@ -109,7 +171,8 @@ async def run_user_cmd(cmd: str, arg: str, sender_id: int) -> str | None:
 
 # owner commands (YOU, via outgoing messages starting with PREFIX, anywhere)
 HELP = ("userbot cmds: `.mission <goal>` `.tick` `.send <chat> <msg>` "
-        "`.contacts` `.mood [chat]` `.reset [chat]` `.persona <n>` `.help`")
+        "`.contacts` `.mood [chat]` `.reset [chat]` `.persona <n>` "
+        "`.bond [chat] [0-3]` `.help`")
 
 
 async def run_owner_cmd(cmd: str, arg: str) -> str:
@@ -145,6 +208,23 @@ async def run_owner_cmd(cmd: str, arg: str) -> str:
         global PERSONA
         PERSONA = arg.strip()
         return f"persona → {PERSONA}"
+    if cmd == "bond":
+        parts = arg.split()
+        target = parts[0] if parts else "me"
+        if len(parts) > 1:
+            try:
+                level = int(parts[1])
+            except ValueError:
+                return "usage: .bond [chat] [0-3]"
+            r = await api("/bond", {"channel": "telegram",
+                                    "chat_id": target, "level": level})
+            b = r.get("bond", {})
+            return (f"bond[{target}] pinned → L{b.get('level')} "
+                    f"({b.get('count', 0)} msgs) 💾")
+        r = await api(f"/bond?channel=telegram&chat_id={target}")
+        b = r.get("bond", {})
+        pin = " 📌" if b.get("manual") else ""
+        return f"bond[{target}]: L{b.get('level')} · {b.get('count', 0)} msgs{pin}"
     return HELP
 
 
@@ -165,7 +245,9 @@ async def handle_owner_message(event) -> str | None:
 
 async def handle_incoming(event, client, me) -> str | None:
     """Someone texted your account → reply via the brain. Returns reply/None."""
-    if getattr(event, "is_group", False) or getattr(event, "is_channel", False):
+    is_group = bool(getattr(event, "is_group", False) or
+                    getattr(event, "is_channel", False))
+    if is_group:
         if not GROUPS:
             return None
         text0 = event.raw_text or ""
@@ -200,9 +282,9 @@ async def handle_incoming(event, client, me) -> str | None:
             if out:
                 await event.reply(out[:4000])
                 return out
-        async with client.action(event.chat_id, "typing"):
-            reply = await chat_reply(text, sid, name, use_search=SEARCH)
-        await event.reply(reply[:4000])
+        reply = await chat_reply(text, sid, name, use_search=SEARCH,
+                                 chat_id=event.chat_id, is_group=is_group)
+        await human_send_reply(event, client, reply)
         print("✓ replied")
         return reply
     except Exception as e:
@@ -221,7 +303,7 @@ async def deliver_outbox(client) -> list:
     for it in items:
         try:
             entity = int(it["to"]) if it["to"].lstrip("-").isdigit() else it["to"]
-            await client.send_message(entity, it["message"])
+            await human_send_message(client, entity, it["message"])
             await api("/ack", {"id": it["id"], "ok": True}, timeout=15)
             print(f"✉ sent → {it['to']}")
             sent.append(it["to"])
@@ -310,7 +392,7 @@ async def main():
 
     asyncio.create_task(outbox_loop())
     print(f"✓ userbot live (dm allowlist: {sorted(ALLOW) or 'everyone'}, "
-          f"groups: {GROUPS}, poll: {POLL}s)")
+          f"groups: {GROUPS}, poll: {POL}s, humanize: {HUMANIZE})")
     await client.run_until_disconnected()
 
 

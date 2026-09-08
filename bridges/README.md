@@ -28,9 +28,15 @@ python bridges/telegram_userbot.py               # first run: phone number + log
   (whoever holds it is logged in as you).
 - DMs: anyone can chat by default; lock it down: `TG_ALLOW=12345,@friend`
 - Groups: off by default (`TG_GROUPS=1` to enable, mention/reply only).
+  Group chats share one conversation context; relationships stay per-sender
+  and are capped at level 1 in groups (no pet names with an audience).
 - **Owner commands** — send from YOUR account anywhere, starting with `.`:
   `.mission <goal>` · `.tick` (force proactive pass) · `.send <chat|me> <msg>`
-  · `.contacts` · `.mood` · `.reset` · `.persona alex` · `.help`
+  · `.contacts` · `.mood` · `.reset` · `.persona alex`
+  · `.bond [chat] [0-3]` (view/pin relationship level) · `.help`
+- **Humanizer** (v3.2): read pauses, typing scaled to reply length,
+  multi-bubble splits, anti-ban pacing. Tune: `HUMAN_WPM=45`
+  `HUMAN_MAXPM=20` `HUMAN_GAP=4`; `TG_HUMANIZE=0` for instant sends.
 - **DM commands** (contacts): `!reset` `!mood` `!search <q>` `!news <q>` `!wiki <q>` `!fact <q>`
 - **Text itself**: `.send me good morning ❤` lands in your Saved Messages.
   The proactive ticker texts silent contacts automatically (see below).
@@ -53,7 +59,9 @@ AI_SERVER_URL=http://localhost:5000 WA_PERSONA=alex node bridges/whatsapp.js
 ```
 
 - Lock responders: `ALLOWED_NUMBERS=2348012345678,234...`
-- `!`-prefixed messages run full agent missions; replies carry mood footers.
+- `!`-prefixed messages run full agent missions; replies are clean (no footers).
+- Groups: mention/reply only by default; `WA_GROUP_OPEN=1` answers everything.
+- Humanizer mirrors Telegram: `WA_HUMANIZE=0` disables, `HUMAN_WPM` tunes.
 - **Text itself**: find your chat id in the bridge logs, then
   `curl -X POST localhost:5000/send -d '{"channel":"whatsapp","to":"234...@c.us","message":"hey me"}'`.
   The proactive ticker + `WA_POLL` loop deliver it like any outbound text.

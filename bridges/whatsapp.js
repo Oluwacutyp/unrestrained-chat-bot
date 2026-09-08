@@ -8,6 +8,8 @@
  * Env: AI_SERVER_URL (default localhost:5000), ALLOWED_NUMBERS (csv, empty = all),
  *      WA_SEARCH=1 (web search on replies), WA_PERSONA=alex|companion|realistic|quant,
  *      WA_MISSION_PREFIX=! (messages starting with ! run full agent missions)
+ *      WA_HUMANIZE=1 (0 = instant sends), HUMAN_WPM=45, HUMAN_SPLIT=1,
+ *      WA_GROUP_OPEN=1 (reply to every group msg; default = mentions/replies only)
  */
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
@@ -101,8 +103,67 @@ client.on('disconnected', (reason) => {
     console.log('Bot will attempt to reconnect...');
 });
 
+// ---------- humanizer (mirrors godquant/companion/humanize.py) ----------
+const HUMANIZE = process.env.WA_HUMANIZE !== '0';
+const HUMAN_WPM = parseInt(process.env.HUMAN_WPM || '45', 10);
+const HUMAN_SPLIT = process.env.HUMAN_SPLIT !== '0';
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+function readDelay(text) {
+    return Math.min(7000, 600 + (text || '').length * 8);
+}
+function typingDelay(text) {
+    const cps = HUMAN_WPM * 5 / 60;
+    return Math.min(22000, 900 + (text || '').length / cps * 1000);
+}
+function splitBubbles(text) {
+    const t = (text || '').trim();
+    if (!t) return [];
+    if (!HUMAN_SPLIT) return [t];
+    const paras = t.split(/\n{2,}/).map(s => s.trim()).filter(Boolean);
+    if (paras.length > 1) return paras.slice(0, 3);
+    if (t.length <= 320) return [t];
+    const out = [];
+    let rest = t;
+    while (rest.length > 320 && out.length < 2) {
+        let cut = rest.lastIndexOf('. ', 320);
+        if (cut < 120) cut = rest.lastIndexOf(' ', 320);
+        if (cut < 120) cut = 320;
+        out.push(rest.slice(0, cut + 1).trim());
+        rest = rest.slice(cut + 1).trim();
+    }
+    if (rest) out.push(rest);
+    return out.slice(0, 3);
+}
+// Send like a human: read pause → typing scaled to length → bubbles.
+// Re-fires sendStateTyping in a loop (WA drops the indicator after ~5s).
+async function humanSend(chat, message, text) {
+    const bubbles = splitBubbles(text);
+    if (!HUMANIZE) {
+        for (const b of bubbles) await chat.sendMessage(b);
+        return;
+    }
+    await sleep(readDelay(text));
+    for (let i = 0; i < bubbles.length; i++) {
+        if (i) await sleep(900 + Math.random() * 1400);
+        const total = typingDelay(bubbles[i]);
+        const t0 = Date.now();
+        try {
+            while (Date.now() - t0 < total) {
+                await chat.sendStateTyping();
+                await sleep(Math.min(4000, Math.max(50, total - (Date.now() - t0))));
+            }
+        } catch (e) { await sleep(total); }
+        if (message && i === 0) await message.reply(bubbles[i]);
+        else await chat.sendMessage(bubbles[i]);
+    }
+    try { await chat.clearState(); } catch (e) {}
+}
+
 // Function to call AI backend
-async function getAIResponse(message, chatId) {
+async function getAIResponse(message, chatId, senderName, isGroup, bondId) {
     try {
         // Mission mode: "!backtest RSI on BTC" runs the full multi-agent swarm
         const prefix = process.env.WA_MISSION_PREFIX || '!';
@@ -118,15 +179,17 @@ async function getAIResponse(message, chatId) {
             conversation_id: chatId,
             channel: 'whatsapp',
             chat_id: chatId,
-            display: '',
+            display: senderName || '',
+            sender_name: senderName || '',
+            is_group: !!isGroup,
+            bond_id: bondId || chatId,
             use_search: process.env.WA_SEARCH === '1',
             persona: process.env.WA_PERSONA || undefined
         }, {
             timeout: 120000  // 120 second timeout (local models can be slow)
         });
         if (response.data && response.data.response) {
-            const mood = response.data.mood ? `\n_${response.data.mood} ${response.data.mood_level || ''}_` : '';
-            return response.data.response + mood;
+            return response.data.response;  // clean — mood stays server-side
         } else {
             return "hey baby, something's not working on my end rn 😅";
         }
@@ -179,9 +242,15 @@ client.on('message', async (message) => {
         const contact = await message.getContact();
         const isGroup = chat.isGroup;
 
-        // Ignore group messages (optional - remove this if you want group responses)
-        if (isGroup) {
-            return;
+        // Groups: respond on mention/reply (or everything with WA_GROUP_OPEN=1)
+        if (isGroup && process.env.WA_GROUP_OPEN !== '1') {
+            const botId = (client.info && client.info.wid) ? client.info.wid._serialized : '';
+            let mentioned = (message.mentionedIds || []).includes(botId);
+            if (!mentioned && message.hasQuotedMsg) {
+                try { mentioned = (await message.getQuotedMessage()).fromMe; }
+                catch (e) { mentioned = false; }
+            }
+            if (!mentioned) return;
         }
 
         // Ignore own messages
@@ -211,25 +280,21 @@ client.on('message', async (message) => {
         console.log(`\n📨 Message from ${contact.pushname || contact.number}:`);
         console.log(`   "${messageText}"`);
 
-        // Show typing indicator
-        await chat.sendStateTyping();
-
         // Add to active chats
         activeChats.add(chat.id._serialized);
         registerContact(chat.id._serialized, contact.pushname || contact.number);
 
-        // Get AI response
+        // Get AI response (groups share one context; bonds stay per-sender)
+        const senderName = contact.pushname || contact.number;
+        const bondId = 'whatsapp:' + (contact.number || chat.id._serialized);
         console.log('🤖 Generating AI response...');
-        const aiResponse = await getAIResponse(messageText, chat.id._serialized);
+        const aiResponse = await getAIResponse(messageText, chat.id._serialized,
+                                               senderName, isGroup, bondId);
 
         console.log(`💬 AI Response: "${aiResponse}"\n`);
 
-        // Small delay to seem more human
-        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
-
-        // Send response
-        await chat.sendStateTyping();
-        await message.reply(aiResponse);
+        // Human send: read pause → typing scaled to length → bubbles
+        await humanSend(chat, message, aiResponse);
 
         console.log('✅ Response sent!\n');
 
@@ -275,7 +340,12 @@ async function pollOutbox() {
         const { data } = await axios.get(`${AI_SERVER_URL}/outbox?channel=whatsapp`, { timeout: 15000 });
         for (const item of (data.pending || [])) {
             try {
-                await client.sendMessage(item.to, item.message);
+                try {
+                    const outChat = await client.getChatById(item.to);
+                    await humanSend(outChat, null, item.message);
+                } catch (e2) {
+                    await client.sendMessage(item.to, item.message);
+                }
                 await axios.post(`${AI_SERVER_URL}/ack`, { id: item.id, ok: true }, { timeout: 10000 });
                 console.log(`✉ sent → ${item.to}`);
             } catch (e) {

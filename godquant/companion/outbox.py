@@ -174,6 +174,14 @@ class ProactiveEngine:
         self.companion = companion
         self.outbox = outbox
 
+    @staticmethod
+    def _is_group(channel: str, chat_id: str) -> bool:
+        if channel == "telegram":
+            return chat_id.startswith("-")  # supergroups/channels
+        if channel == "whatsapp":
+            return chat_id.endswith("@g.us")
+        return False
+
     def _due(self, row: tuple, now: float) -> bool:
         channel, chat_id, display, enabled, quiet, max_n, nudges, day, \
             last_in, last_out = row
@@ -198,7 +206,7 @@ class ProactiveEngine:
         return True
 
     def tick(self) -> list[dict]:
-        """One proactive pass. Returns queued messages."""
+        """One proactive pass. Returns queued messages. DMs only, never groups."""
         now = time.time()
         with self.outbox._lock:
             rows = self.outbox._conn.execute(
@@ -208,13 +216,15 @@ class ProactiveEngine:
         queued = []
         for row in rows:
             channel, chat_id = row[0], row[1]
+            if self._is_group(channel, chat_id):
+                continue  # never slide into groups uninvited
             try:
                 if not self._due(row, now):
                     continue
                 silence = int(now - (row[8] or now))
                 cid = f"{channel}:{chat_id}"
                 opener = self.companion.proactive_opener(
-                    cid, self.cfg.persona, silence)
+                    cid, self.cfg.persona, silence, display=row[2])
                 mid = self.outbox.enqueue(channel, chat_id, opener)
                 with self.outbox._lock:
                     self.outbox._conn.execute(

@@ -88,6 +88,14 @@ def test_total_failure_lands_on_heuristic(monkeypatch):
     assert LLMRouter(cfg, None).complete("s", "u").provider == "heuristic"
 
 
+def test_coerce_fallbacks_tolerates_brackets():
+    from godquant.config import _coerce
+    assert _coerce("llm_fallbacks", '["HuggingFace","pollinations"]') == [
+        "huggingface", "pollinations"]
+    assert _coerce("llm_fallbacks", "groq") == ["groq"]
+    assert _coerce("server_port", "5101") == 5101
+
+
 def test_fallbacks_env_parsing(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("GQ_FALLBACKS", "HuggingFace, pollinations")

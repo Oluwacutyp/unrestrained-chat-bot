@@ -401,11 +401,15 @@ def cmd_doctor(args, cfg, memory, router, orch):
     checks.append(("workspace", str(cfg.resolved_workspace())))
     checks.append(("agents", ", ".join(sorted(AGENTS))))
     checks.append(("persona", cfg.persona))
-    try:
-        import llama_cpp  # type: ignore
-        checks.append(("llama-cpp", "installed (local GGUF ready)"))
-    except Exception:
-        checks.append(("llama-cpp", "missing (optional; cloud LLMs unaffected)"))
+    import shutil as _shutil
+    if _shutil.which("llama-server"):
+        checks.append(("llama-cpp", "binary ready (`llama-server`, Termux pkg)"))
+    else:
+        try:
+            import llama_cpp  # type: ignore
+            checks.append(("llama-cpp", "python pkg ready (local GGUF)"))
+        except Exception:
+            checks.append(("llama-cpp", "missing (optional; cloud LLMs ok)"))
     from godquant.companion.local_llm import MODELS_DIR
     ggufs = list(MODELS_DIR.glob("*.gguf")) if MODELS_DIR.exists() else []
     checks.append(("gguf_models", str(len(ggufs))))
@@ -434,11 +438,12 @@ def cmd_doctor(args, cfg, memory, router, orch):
 
 def cmd_config(args, cfg, memory, router, orch):
     if args.set:
+        from godquant.config import _coerce
         k, _, v = args.set.partition("=")
         if hasattr(cfg, k):
-            setattr(cfg, k, v)
+            setattr(cfg, k, _coerce(k, v))  # coerce so lists/ints save typed
             save_config(cfg)
-            say(f"✓ {k} = {v}")
+            say(f"✓ {k} = {getattr(cfg, k)}")
         else:
             say(f"unknown key: {k}")
     else:

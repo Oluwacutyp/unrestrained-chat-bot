@@ -112,7 +112,9 @@ def _coerce(field_name: str, value: str):
     if field_name in floats:
         return float(value)
     if field_name == "llm_fallbacks":
-        return [x.strip().lower() for x in value.split(",") if x.strip()]
+        s = value.strip().strip("[]")  # tolerate '["a","b"]' or 'a,b'
+        return [x.strip().strip("'\"").lower()
+                for x in s.split(",") if x.strip().strip("'\"")]
     return value
 
 

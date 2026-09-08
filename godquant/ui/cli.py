@@ -222,6 +222,62 @@ def cmd_models(args, cfg, memory, router, orch):
         say(LL.list_models())
 
 
+def cmd_send(args, cfg, memory, router, orch):
+    from godquant.companion.outbox import Outbox
+    ob = Outbox(cfg.resolved_memory_db())
+    try:
+        mid = ob.enqueue(args.channel, args.to, args.message)
+        say(f"✓ queued #{mid} → {args.channel}:{args.to} "
+            f"(delivered on next bridge poll)")
+    finally:
+        ob.close()
+
+
+def cmd_tick(args, cfg, memory, router, orch):
+    from godquant.companion.companion import CompanionAgent
+    from godquant.companion.outbox import Outbox, ProactiveEngine
+    ob = Outbox(cfg.resolved_memory_db())
+    try:
+        queued = ProactiveEngine(cfg, CompanionAgent(cfg, router, memory), ob).tick()
+        if not queued:
+            say("nothing due 😴 (no silent contacts / quiet hours / limits)")
+        for m in queued:
+            say(f"✉ #{m['id']} → {m['channel']}:{m['to']}: {m['message'][:100]}")
+    finally:
+        ob.close()
+
+
+def cmd_contacts(args, cfg, memory, router, orch):
+    from godquant.companion.outbox import Outbox
+    ob = Outbox(cfg.resolved_memory_db())
+    try:
+        if args.add:
+            ch, _, rest = args.add.partition(":")
+            chat_id, _, display = rest.partition(":")
+            ob.upsert_contact(ch or "whatsapp", chat_id, display)
+            say(f"✓ registered {ch}:{chat_id}")
+        elif args.remove:
+            ch, _, chat_id = args.remove.partition(":")
+            ob.remove(ch, chat_id)
+            say("✓ removed")
+        elif args.enable:
+            ch, _, chat_id = args.enable.partition(":")
+            ob.set_enabled(ch, chat_id, True)
+            say("✓ proactive ON")
+        elif args.disable:
+            ch, _, chat_id = args.disable.partition(":")
+            ob.set_enabled(ch, chat_id, False)
+            say("✓ proactive OFF")
+        else:
+            for c in ob.list_contacts():
+                bell = "🔔" if c["enabled"] else "🔕"
+                say(f"{bell} {c['channel']}:{c['chat_id']} ({c['display']}) "
+                    f"nudges={c['nudges_today']} silent={c['last_inbound_ago']}s")
+            say(str(ob.stats()))
+    finally:
+        ob.close()
+
+
 def cmd_doctor(args, cfg, memory, router, orch):
     import sqlite3
     checks = []
@@ -256,6 +312,16 @@ def cmd_doctor(args, cfg, memory, router, orch):
     from godquant.companion.local_llm import MODELS_DIR
     ggufs = list(MODELS_DIR.glob("*.gguf")) if MODELS_DIR.exists() else []
     checks.append(("gguf_models", str(len(ggufs))))
+    try:
+        import telethon  # type: ignore
+        checks.append(("telethon", telethon.__version__ + " (TG userbot ready)"))
+    except Exception:
+        checks.append(("telethon", "missing (pip install telethon for TG bridge)"))
+    import shutil
+    checks.append(("node", shutil.which("node") and "installed (WA bridge ready)"
+                  or "missing (WA bridge needs Node)"))
+    checks.append(("proactive", f"every {cfg.proactive_interval}s, nudge after "
+                                f"{cfg.nudge_after}s, quiet '{cfg.quiet_hours or 'none'}'"))
     say("God Quant Doctor\n")
     for k, v in checks:
         say(f"  {k:<12} {v}")
@@ -342,6 +408,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     md = sub.add_parser("models", help="list/download local GGUF models")
     md.add_argument("--download", default=None)
+
+    sd = sub.add_parser("send", help="queue an outbound message (bot texts first)")
+    sd.add_argument("--channel", default="whatsapp")
+    sd.add_argument("--to", required=True)
+    sd.add_argument("--message", required=True)
+
+    sub.add_parser("tick", help="run one proactive-texting pass now")
+
+    ct = sub.add_parser("contacts", help="proactive-texting registry")
+    ct.add_argument("--add", default=None, help="channel:chat_id[:display]")
+    ct.add_argument("--remove", default=None, help="channel:chat_id")
+    ct.add_argument("--enable", default=None, help="channel:chat_id")
+    ct.add_argument("--disable", default=None, help="channel:chat_id")
     return p
 
 
@@ -350,7 +429,8 @@ _HANDLERS = {"chat": cmd_chat, "mission": cmd_mission, "build": cmd_build,
              "review": cmd_review, "memory": cmd_memory, "report": cmd_report,
              "strategies": cmd_strategies, "test": cmd_test,
              "doctor": cmd_doctor, "config": cmd_config,
-             "serve": cmd_serve, "partner": cmd_partner, "models": cmd_models}
+             "serve": cmd_serve, "partner": cmd_partner, "models": cmd_models,
+             "send": cmd_send, "tick": cmd_tick, "contacts": cmd_contacts}
 
 
 def main(argv: list[str] | None = None):

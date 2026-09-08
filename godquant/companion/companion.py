@@ -146,6 +146,40 @@ class CompanionAgent(BaseAgent):
                 "persona": persona,
                 "sampling": sampling}
 
+    def proactive_opener(self, cid: str, persona: str | None = None,
+                         silence_s: int = 3600) -> str:
+        """Generate a TEXT-FIRST opener (they've been silent). Saved as our msg."""
+        persona = persona or self.cfg.persona
+        get_persona(persona)
+        mood_ctx = self.moods.context(cid)
+        history = self._load_history(cid)
+        summary = self.history_summary(history)
+        system = render_persona(persona, mood_context=mood_ctx,
+                                history_summary=summary)
+        hrs = silence_s / 3600
+        if hrs < 1.5:
+            situ = "They went quiet ~an hour ago. Send ONE short check-in text."
+        elif hrs < 5:
+            situ = (f"They've been silent {hrs:.0f} hours. You're noticing. "
+                    f"Text them first — feelings depend on your CURRENT MOOD.")
+        else:
+            situ = (f"They've ignored you for {hrs:.0f} hours. React in character "
+                    f"to your CURRENT MOOD (worried? mad? cold? needy?).")
+        nudge = (f"[YOU text THEM first — this is YOUR outbound message, not a reply. "
+                 f"{situ} Keep it to 1-2 short texts max, in your texting style. "
+                 f"NEVER narrate or explain, just the text itself.]")
+        try:
+            system += self.memory.lesson_context("proactive texting opener")
+        except Exception:
+            pass
+        text = self.router.complete(system, nudge, agent=self.name).text.strip()
+        # strip any accidental narration/prefix the model adds
+        for prefix in ("suggested text:", "message:", "text:"):
+            if text.lower().startswith(prefix):
+                text = text[len(prefix):].strip().strip('"')
+        self._save_msg(cid, "assistant", text)
+        return text
+
     def reset(self, cid: str = "default"):
         self.moods.reset(cid)
         return {"message": "Fresh start"}

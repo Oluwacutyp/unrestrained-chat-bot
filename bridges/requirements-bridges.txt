@@ -1,0 +1,3 @@
+# Telegram userbot (Termux-friendly)
+telethon>=1.34
+# WhatsApp bridge is Node (PC): npm install whatsapp-web.js qrcode-terminal axios

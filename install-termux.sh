@@ -10,12 +10,15 @@ fi
 PY=$(command -v python3 || command -v python)
 $PY -m pip install --upgrade pip 2>/dev/null || true
 echo "— optional accelerators (safe to skip on low storage) —"
-$PY -m pip install requests numpy rich pytest 2>/dev/null || echo "(skipped optionals — stdlib mode is fine)"
+$PY -m pip install requests rich pytest 2>/dev/null || echo "(skipped optionals — stdlib mode is fine)"
+echo "— telegram userbot (recommended: your own account, replies + texts first) —"
+$PY -m pip install telethon 2>/dev/null || echo "(skipped telethon — install later for the TG bridge)"
 mkdir -p ~/.godquant workspace tests
-$PY gq.py doctor
+$PY bot.py doctor
 echo ""
 echo "✓ Done. Try:"
-echo "  $PY gq.py --offline backtest --symbol BTCUSDT --strategy sma_cross"
-echo "  $PY gq.py --offline mission \"design and backtest an RSI strategy\""
+echo "  $PY bot.py --offline partner \"hey babe i miss you\" --persona alex"
+echo "  $PY bot.py serve            # brain + chat UI + proactive ticker"
+echo "  python bridges/telegram_userbot.py   # needs TG_API_ID/TG_API_HASH"
 echo ""
 echo "For full AI power, add a free key:  export GQ_API_KEY=gsk_...   (Groq free tier)"

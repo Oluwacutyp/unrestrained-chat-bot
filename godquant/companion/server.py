@@ -11,6 +11,10 @@ API is backward compatible with whatsapp.js:
   POST /mission   {goal}            → multi-agent run
   POST /backtest  {symbol, strategy, params?, optimize?, metric?}
   POST /risk      {equity, risk, entry, stop, ...}
+  POST /send      {channel, to, message}  → queue outbound (bot texts first)
+  GET  /outbox?channel=  → pending outbound for bridges (+ POST /ack {id,ok})
+  GET|POST /contacts     → proactive-texting registry
+  POST /tick             → run proactive pass now
 GET / serves the single-file chat UI (mobile-first, Termux-friendly).
 """
 from __future__ import annotations
@@ -134,6 +138,14 @@ class _Handler(BaseHTTPRequestHandler):
         if parsed.path == "/personas":
             from godquant.companion.personas import PERSONAS
             return self._json({k: v["blurb"] for k, v in PERSONAS.items()})
+        if parsed.path == "/outbox":
+            channel = q.get("channel", ["whatsapp"])[0]
+            with self.lock:
+                return self._json({"pending": self.outbox.pending(channel)})
+        if parsed.path == "/contacts":
+            with self.lock:
+                return self._json({"contacts": self.outbox.list_contacts(),
+                                   **self.outbox.stats()})
         return self._json({"error": "not found"}, 404)
 
     def do_POST(self):
@@ -146,11 +158,45 @@ class _Handler(BaseHTTPRequestHandler):
                 if not msg and not data.get("image"):
                     return self._json({"error": "No message"}, 400)
                 with self.lock:
+                    if data.get("channel") and data.get("chat_id"):
+                        self.outbox.upsert_contact(data["channel"], str(data["chat_id"]),
+                                                   data.get("display", ""),
+                                                   touch_inbound=True)
                     out = companion.chat(msg, cid,
                                          persona=data.get("persona"),
                                          use_search=data.get("use_search", False),
                                          image_data=data.get("image"))
                 return self._json({**out, "conversation_id": cid})
+            if path == "/send":
+                if not data.get("message") or not data.get("to"):
+                    return self._json({"error": "need {channel, to, message}"}, 400)
+                with self.lock:
+                    mid = self.outbox.enqueue(data.get("channel", "whatsapp"),
+                                              str(data["to"]), data["message"])
+                return self._json({"queued": mid})
+            if path == "/ack":
+                with self.lock:
+                    self.outbox.ack(int(data.get("id", 0)),
+                                    bool(data.get("ok", True)))
+                return self._json({"ok": True})
+            if path == "/contacts":
+                ch, chat_id = data.get("channel"), data.get("chat_id")
+                if not ch or not chat_id:
+                    return self._json({"error": "need {channel, chat_id}"}, 400)
+                with self.lock:
+                    if data.get("remove"):
+                        self.outbox.remove(ch, str(chat_id))
+                    else:
+                        self.outbox.upsert_contact(ch, str(chat_id),
+                                                   data.get("display", ""))
+                        if "enabled" in data:
+                            self.outbox.set_enabled(ch, str(chat_id),
+                                                    bool(data["enabled"]))
+                    return self._json({"contacts": self.outbox.list_contacts()})
+            if path == "/tick":
+                with self.lock:
+                    queued = self.engine.tick()
+                return self._json({"queued": queued})
             if path == "/reset":
                 with self.lock:
                     return self._json(companion.reset(data.get("conversation_id", "default")))
@@ -208,7 +254,10 @@ class _Handler(BaseHTTPRequestHandler):
 
 def create_server(cfg, router, memory, orch, companion,
                   host: str | None = None, port: int | None = None) -> ThreadingHTTPServer:
+    from godquant.companion.outbox import Outbox, ProactiveEngine
     _Handler.stack = (cfg, router, memory, orch, companion)
+    _Handler.outbox = Outbox(cfg.resolved_memory_db())
+    _Handler.engine = ProactiveEngine(cfg, companion, _Handler.outbox)
     srv = ThreadingHTTPServer((host or cfg.server_host, port or cfg.server_port),
                               _Handler)
     srv.daemon_threads = True
@@ -216,11 +265,32 @@ def create_server(cfg, router, memory, orch, companion,
 
 
 def serve_forever(cfg, router, memory, orch, companion):
+    import time as _time
     srv = create_server(cfg, router, memory, orch, companion)
     addr = f"http://{cfg.server_host}:{cfg.server_port}"
-    print(f"\n◈ God Quant server v{__version__} → {addr}")
+    print(f"\n◈ Unrestrained bot server v{__version__} → {addr}")
     print("  chat UI: /   api: /chat /mission /backtest /risk /research /mood")
-    print("  WhatsApp bridge: AI_SERVER_URL=" + addr + " node bridges/whatsapp.js\n")
+    print("  messaging: /send /outbox /contacts /tick")
+    print("  WhatsApp:  AI_SERVER_URL=" + addr + " node bridges/whatsapp.js")
+    print("  Telegram:  python bridges/telegram_userbot.py  (own-account userbot)\n")
+    if cfg.proactive_interval > 0:
+        print(f"  proactive ticker: every {cfg.proactive_interval}s "
+              f"(nudge after {cfg.nudge_after}s silence, "
+              f"{cfg.max_nudges}/day, quiet '{cfg.quiet_hours or 'none'}')\n")
+
+        def _ticker():
+            while True:
+                _time.sleep(cfg.proactive_interval)
+                try:
+                    with _Handler.lock:
+                        queued = _Handler.engine.tick()
+                    for m in queued:
+                        print(f"  ✉ queued proactive → {m['channel']}:{m['to']}: "
+                              f"{m['message'][:80]}")
+                except Exception as e:
+                    log.warning("ticker: %s", e)
+
+        threading.Thread(target=_ticker, daemon=True).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

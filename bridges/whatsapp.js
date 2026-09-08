@@ -116,6 +116,9 @@ async function getAIResponse(message, chatId) {
         const response = await axios.post(`${AI_SERVER_URL}/chat`, {
             message: message,
             conversation_id: chatId,
+            channel: 'whatsapp',
+            chat_id: chatId,
+            display: '',
             use_search: process.env.WA_SEARCH === '1',
             persona: process.env.WA_PERSONA || undefined
         }, {
@@ -213,6 +216,7 @@ client.on('message', async (message) => {
 
         // Add to active chats
         activeChats.add(chat.id._serialized);
+        registerContact(chat.id._serialized, contact.pushname || contact.number);
 
         // Get AI response
         console.log('🤖 Generating AI response...');

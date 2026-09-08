@@ -26,6 +26,7 @@ pkg update -y && pkg upgrade -y
 pkg install -y python git
 git clone https://github.com/Oluwacutyp/unrestrained-chat-bot
 cd unrestrained-chat-bot
+git checkout arena/01a08284-unrestrained-chat-bot   # the code lives here, not main
 bash install-termux.sh
 ```
 

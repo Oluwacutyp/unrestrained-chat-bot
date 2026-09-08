@@ -28,6 +28,10 @@ class LLMResponse:
 
 
 def _http_post(url: str, payload: dict, headers: dict, timeout: int) -> dict:
+    # Browser-like UA: Cloudflare-fronted APIs (Groq, Pollinations, HF router)
+    # 403/1010 the stock `Python-urllib` / `python-requests` UAs on some networks.
+    headers = {"User-Agent": "Mozilla/5.0 (Linux; Android 10; Termux) godquant/3.1",
+               "Accept": "application/json", **headers}
     data = json.dumps(payload).encode()
     if _requests is not None:
         r = _requests.post(url, json=payload, headers=headers, timeout=timeout)

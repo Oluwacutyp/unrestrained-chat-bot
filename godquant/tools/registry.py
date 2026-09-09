@@ -86,19 +86,44 @@ def _safe(rel: str, root: Path) -> Path:
 
 # ---------- implementations ----------
 def _fetch(args: dict, ctx: dict) -> str:
-    url = (args.get("url") or "").strip()
-    if not url.startswith(("http://", "https://", "file://")):
-        raise ValueError("need http(s) or file url")
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        html = r.read()[:200000].decode("utf-8", "replace")
-    m = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
-    title = re.sub(r"\s+", " ", m.group(1)).strip()[:200] if m else ""
-    text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html,
-                  flags=re.I | re.S)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()[:2000]
-    return f"TITLE: {title}\nTEXT: {text}" if title else f"TEXT: {text}"
+    from godquant.tools.research import fetch_text
+    return fetch_text((args.get("url") or "").strip())
+
+
+def _research(args: dict, ctx: dict) -> str:
+    from godquant.tools.research import research
+    return research(args.get("query", ""),
+                    max_sources=int(args.get("max_sources", 3) or 3))
+
+
+def _codegen(args: dict, ctx: dict) -> str:
+    import json as _json
+    import sys as _sys
+    root = Path(__file__).resolve().parents[2]
+    script = root / "scripts" / "codegen_megabuild.py"
+    if not script.exists():
+        raise ValueError("codegen script missing")
+    spec = args.get("spec")
+    if isinstance(spec, str):
+        try:
+            spec = _json.loads(spec)
+        except Exception:
+            raise ValueError("spec must be a dict or JSON string")
+    if not isinstance(spec, dict) or not spec.get("files"):
+        raise ValueError("need spec.files {path: content}")
+    ws = _ws(ctx)
+    name = re.sub(r"[^\w-]+", "_", str(spec.get("name", "build")))[:40]
+    proj = ws / "codegen" / name
+    spec_path = proj / "spec.json"
+    proj.mkdir(parents=True, exist_ok=True)
+    spec_path.write_text(_json.dumps(spec))
+    p = subprocess.run([_sys.executable, str(script), str(spec_path),
+                        "--project", str(proj)],
+                       capture_output=True, text=True, timeout=300)
+    out = (p.stdout + p.stderr).strip()[-4000:]
+    if p.returncode != 0:
+        raise ValueError(f"codegen failed (exit {p.returncode}): {out[-500:]}")
+    return out or f"built {proj}"
 
 
 def _recall(args: dict, ctx: dict) -> str:
@@ -187,5 +212,9 @@ register(Tool("shell", "raw shell in workspace", "dangerous",
               {"cmd": "shell", "timeout": "sec"}, _shell))
 register(Tool("git_status", "git status of repo", "read", {}, 
               lambda a, c: _git(a, c, "status")))
+register(Tool("deep_research", "search + read N pages, brief with sources",
+              "read", {"query": "str", "max_sources": "int=3"}, _research))
+register(Tool("codegen", "multi-file project build from spec (coder)",
+              "act", {"spec": "{name, files, tests}"}, _codegen))
 register(Tool("git_commit", "git commit staged/all", "act",
               {"message": "msg"}, lambda a, c: _git(a, c, "commit")))

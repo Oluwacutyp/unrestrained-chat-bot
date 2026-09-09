@@ -17,12 +17,12 @@ HELP = {
                  "`.send <chat> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                  "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                  "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.train …` `.good` `.bad` `.cal …` `.spend …` `.ledger` `.health …` `.bible …` `.model …` `.help`"),
+                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.train …` `.good` `.bad` `.cal …` `.spend …` `.ledger` `.health …` `.bible …` `.model …` `.research` `.help`"),
     "discord": ("discord cmds: `.mission <goal>` `.code <task>` `.exec <shell>` `.tick` "
                 "`.send <id> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                 "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                 "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.train …` `.good` `.bad` `.cal …` `.spend …` `.ledger` `.health …` `.bible …` `.model …` `.help`"),
+                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.train …` `.good` `.bad` `.cal …` `.spend …` `.ledger` `.health …` `.bible …` `.model …` `.research` `.help`"),
 }
 
 
@@ -414,6 +414,15 @@ async def run_owner_command(api, channel: str, cmd: str, arg: str,
                           for e in es[:15])[:2000]
     if cmd == "bible":
         return await _bible(api, arg)
+    if cmd == "research":
+        q = arg.strip()
+        if not q:
+            return ("usage: .research <question> — searches + reads pages, "
+                    "brief with sources")
+        r = await api("/research", {"query": q})
+        if r.get("error"):
+            return f"research failed: {r['error']}"
+        return (r.get("brief") or "(empty)")[:3500]
     if cmd == "stats":
         r = await api("/status")
         mems = r.get("memories", {})

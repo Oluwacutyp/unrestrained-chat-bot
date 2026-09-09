@@ -47,7 +47,7 @@ class CoderAgent(BaseAgent):
         if self.cfg.offline:  # offline: byte-identical legacy path
             out = self.ask(task.instruction)
         else:
-            out = self.ask_with_tools(task.instruction, ["py_run", "fs_read"])
+            out = self.ask_with_tools(task.instruction, ["py_run", "fs_read", "codegen"])
         artifacts: dict = {}
         # extract first python block and smoke-test it in the sandbox
         m = self.CODE_RE.search(out)

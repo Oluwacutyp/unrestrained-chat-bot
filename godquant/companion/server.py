@@ -28,6 +28,7 @@ API is backward compatible with whatsapp.js:
   POST /remind {action,text,due_ts..} → reminders that fire via outbox
   POST /want {text..} + GET|POST /mind → intentions engine
   GET  /journal /brief + POST /dream /note /fetch → memory + briefing
+  POST /research {query} → search+read brief
   GET  /recall?q=&scope= | GET|POST /memories → unified memory ops
   GET|POST /missions → persistent projects (create/list/get/resume)
   GET /train/status|/train/script + POST /train/export|/train/push|/pref
@@ -712,6 +713,22 @@ class _Handler(BaseHTTPRequestHandler):
                         return self._json({"ok": b.bible_del(name)})
                 return self._json({"error": "action: save|new|get|list|del"},
                                   400)
+            if path == "/research":
+                q = (data.get("query") or "").strip()
+                if not q:
+                    return self._json({"error": "need {query}"}, 400)
+                try:
+                    from godquant.tools.registry import run_tool
+                    r = run_tool(
+                        "deep_research",
+                        {"query": q, "max_sources": int(
+                            data.get("max_sources", 3) or 3)},
+                        {"memory": self.mind.mem})
+                except Exception as e:
+                    return self._json({"error": str(e)}, 502)
+                if not r["ok"]:
+                    return self._json({"error": r["error"]}, 502)
+                return self._json({"brief": r["output"][:8000]})
             if path == "/warn":
                 msg = (data.get("message") or "").strip()[:500]
                 if not msg:

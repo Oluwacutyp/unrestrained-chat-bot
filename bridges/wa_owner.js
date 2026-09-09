@@ -21,7 +21,7 @@ const HELP = 'wa cmds: `.mission <goal>` `.code <task>` `.exec <shell>` `.tick` 
     '`.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` ' +
     '`.project <goal>` `.projects` `.resume <id>` `.train …` ' +
     '`.good` `.bad` `.cal …` `.spend …` `.ledger` `.health …` ' +
-    '`.bible …` `.help`';
+    '`.bible …` `.research` `.help`';
 
 function parseOwnerCommand(text) {
     const t = (text || '').trim();
@@ -393,6 +393,12 @@ async function handleOwnerCommand(text, ctx) {
     }
     if (cmd === 'bible') {
         return await bibleCmd(post, arg);
+    }
+    if (cmd === 'research') {
+        if (!arg.trim()) return 'usage: .research <question> — searches + reads pages, brief with sources';
+        const r = await post('/research', { query: arg.trim() });
+        if (r.error) return 'research failed: ' + r.error;
+        return (r.brief || '(empty)').slice(0, 3500);
     }
     if (cmd === 'fetch') {
         if (!arg) return 'usage: .fetch <url>';

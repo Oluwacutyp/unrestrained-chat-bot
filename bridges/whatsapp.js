@@ -14,6 +14,8 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const axios = require('axios');
+const ownerCmd = require('./wa_owner');
+const OWNER_NUMBER = (process.env.WA_OWNER_NUMBER || '').replace(/[^0-9]/g, '');
 
 console.log('\n' + '='.repeat(60));
 console.log('🤖 WhatsApp AI Partner Bot Starting...');
@@ -176,6 +178,20 @@ async function warnSelf(kind, msg) {
     } catch (e) { /* brain down — nothing to do */ }
 }
 
+async function waPost(path, payload, timeoutMs) {
+    const res = await axios.post(`${AI_SERVER_URL}${path}`, payload || {}, { timeout: timeoutMs || 60000 });
+    return res.data;
+}
+async function fetchHistoryForImport(chat, limit) {
+    const msgs = await chat.fetchMessages({ limit: limit || 200 });
+    return msgs.filter(m => (m.body || '').trim()).map(m => ({
+        role: m.fromMe ? 'assistant' : 'user',
+        text: (m.body || '').slice(0, 1000),
+        ts: m.timestamp || 0,
+        sender: ((m.author || m.from || '').replace(/[^0-9]/g, '')) || ''
+    }));
+}
+
 // Function to call AI backend
 async function getAIResponse(message, chatId, senderName, isGroup, bondId) {
     try {
@@ -290,6 +306,15 @@ client.on('message', async (message) => {
 
         if (!messageText) {
             return;  // Ignore empty messages
+        }
+
+        // Owner commands (WA_OWNER_NUMBER only, .-prefixed, any chat incl. self)
+        if (OWNER_NUMBER && contact.number === OWNER_NUMBER && messageText.startsWith('.')) {
+            const out = await ownerCmd.handleOwnerCommand(messageText, {
+                post: waPost, channel: 'whatsapp', chatId: chat.id._serialized,
+                fetchHistory: async (limit) => fetchHistoryForImport(chat, limit)
+            });
+            if (out) { await message.reply(out); return; }
         }
 
         console.log(`\n📨 Message from ${contact.pushname || contact.number}:`);

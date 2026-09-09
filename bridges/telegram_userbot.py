@@ -224,38 +224,7 @@ HELP = ("userbot cmds: `.mission <goal>` `.tick` `.send <chat> <msg>` "
 
 
 async def run_owner_cmd(cmd: str, arg: str) -> str:
-    if cmd == "help":
-        return HELP
-    if cmd == "mission":
-        r = await api("/mission", {"goal": arg}, timeout=300)
-        parts = [f"[{x['agent']}] {x['output']}" for x in r.get("results", [])]
-        return "\n\n".join(parts)[:4000] or "done, no output"
-    if cmd == "tick":
-        r = await api("/tick", {}, timeout=180)
-        q = r.get("queued", [])
-        return f"queued {len(q)}: " + "; ".join(
-            f"{m['channel']}:{m['to']}" for m in q) if q else "nothing due 😴"
-    if cmd == "send":
-        to, _, msg = arg.partition(" ")
-        if not to or not msg:
-            return "usage: .send <chat_id|me|username> <message>"
-        r = await api("/send", {"channel": "telegram", "to": to, "message": msg})
-        return f"queued #{r.get('queued')} → {to} ✉"
-    if cmd == "contacts":
-        r = await api("/contacts")
-        lines = [f"{c['channel']}:{c['chat_id']} ({c['display']}) "
-                 f"{'🔔' if c['enabled'] else '🔕'}" for c in r.get("contacts", [])]
-        return "\n".join(lines) or "no contacts yet" + f"\n{r.get('outbox')}"
-    if cmd == "mood":
-        m = await api(f"/mood?conversation_id={arg or 'tg:me'}")
-        return f"{m.get('current')} ({m.get('level')}/10)"
-    if cmd == "reset":
-        await api("/reset", {"conversation_id": arg or "tg:me"})
-        return "reset ✨"
-    if cmd == "persona":
-        global PERSONA
-        PERSONA = arg.strip()
-        return f"persona → {PERSONA}"
+    """Owner commands: .import needs the live client, rest via shared core."""
     if cmd == "import":
         if BRIDGE_CLIENT is None:
             return "client not ready — try again in a few seconds"
@@ -287,38 +256,8 @@ async def run_owner_cmd(cmd: str, arg: str) -> str:
         facts = r.get("facts", [])
         head = f"imported {r.get('imported', 0)} msgs, learned {len(facts)} facts"
         return head if not facts else head + ": " + ", ".join(facts[:12])
-    if cmd == "memory":
-        target = arg.strip() or "me"
-        r = await api(f"/memory?channel=telegram&chat_id={target}")
-        facts = r.get("facts", [])
-        b = r.get("bond", {})
-        head = (f"memory[{target}] L{b.get('level')} score {b.get('score')} "
-                f"fric {b.get('friction')} streak {b.get('streak')}d")
-        if not facts:
-            return head + " — no facts yet 🧠"
-        rest = " | ".join(f"{f['key']}={f['value']}" for f in facts)
-        return (head + " | " + rest)[:3500]
-    if cmd == "bond":
-        parts = arg.split()
-        target = parts[0] if parts else "me"
-        if len(parts) > 1:
-            if parts[1].lower() == "auto":
-                level = "auto"
-            else:
-                try:
-                    level = int(parts[1])
-                except ValueError:
-                    return "usage: .bond [chat] [0-3|auto]"
-            r = await api("/bond", {"channel": "telegram",
-                                    "chat_id": target, "level": level})
-            b = r.get("bond", {})
-            return (f"bond[{target}] pinned → L{b.get('level')} "
-                    f"({b.get('count', 0)} msgs) 💾")
-        r = await api(f"/bond?channel=telegram&chat_id={target}")
-        b = r.get("bond", {})
-        pin = " 📌" if b.get("manual") else ""
-        return f"bond[{target}]: L{b.get('level')} · {b.get('count', 0)} msgs{pin}"
-    return HELP
+    from bridges.owner import run_owner_command
+    return await run_owner_command(api, "telegram", cmd, arg)
 
 
 # ---------- message handling (pure logic — unit-tested with fake events) ----------

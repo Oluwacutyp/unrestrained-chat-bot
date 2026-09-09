@@ -228,6 +228,15 @@ Yes — clone the repo anywhere, each install is independent:
 - **WhatsApp on Termux:** use the Baileys bridge (no browser needed):
   `node bridges/whatsapp_baileys.js` with `WA_PAIR_NUMBER` set.
 
+## 8.7 Owner commands + task mode (self-chat)
+
+Your Saved Messages (Telegram) or self-chat (WhatsApp, needs
+`WA_OWNER_NUMBER` set to your digits) is a control room: `.persona 42 devon`
+to change who's talking where, `.models`/`.model groq` to switch brains,
+`.mission research X` for multi-agent tasks, `.code build a scraper` for
+audited code, `.exec` for raw shell (**only with `GQ_ALLOW_EXEC=1`** — anyone
+holding your unlocked phone could run commands, so think before enabling).
+
 ## 9. Security notes (read once)
 
 - `~/.godquant/env.sh` + `tg_userbot.session` = your keys + your Telegram login.

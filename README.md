@@ -51,6 +51,13 @@ One brain, two bridges — both **reply and deliver**, so the bot texts first:
 | `bridges/whatsapp.js` (Node, QR login) | ✅ DMs + groups | ✅ via outbox poll | **PC** (needs Chrome) |
 | `bridges/telegram_userbot.py` (MTProto, **your own account**) | ✅ DMs + groups | ✅ via outbox poll | **Termux ✅** |
 
+v3.6 command deck: **one owner-command core on every platform** (Telegram,
+WhatsApp classic + Baileys, Discord) — per-chat `.persona`, `.bond`, `.memory`,
+`.forget`, `.models`/`.model` runtime LLM switching, `.stats`, `.mission`,
+`.code` (audited agent coding), `.exec` (flag-gated shell). Discord is now an
+**autonomous agent**: welcomes new members by DM, joins threads it finds
+interesting, optional history catch-up. Bring **your own model** via llama-server
+/ Ollama endpoint or the `llamacpp` provider.
 v3.5 no-holding-back drop: **LLM memory extraction** (any phrasing — "I'm Chidi
 btw" just works), **learning from every chat** (style notes + distilled lessons),
 **history import** (`.import`/Telegram/Discord past chats become pre-deployment

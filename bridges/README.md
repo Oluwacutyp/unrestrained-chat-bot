@@ -121,6 +121,42 @@ Bridge/brain failures are queued to YOURSELF: Telegram Saved Messages
 the bridge log on connect), Discord owner DM (`GQ_OWNER_DISCORD`). Throttled
 to 1 per kind per 5 min, both bridge-side and server-side (`POST /warn`).
 
+## Command deck (v3.6 — same on every platform)
+
+One shared core (`bridges/owner.py` for Python, `bridges/wa_owner.js` for
+WhatsApp). Telegram: your outgoing `.cmd` anywhere. Discord: owner DM or
+server. WhatsApp: `WA_OWNER_NUMBER` + `.cmd` in any chat incl. self-chat.
+
+| Command | What it does |
+|---|---|
+| `.persona` / `.persona devon` / `.persona 42 quant` / `.persona 42 clear` | show / set global / per-chat override / clear |
+| `.bond [chat] [0-3\|auto]` · `.memory [chat]` · `.forget <chat> [deep]` | relationships + dossier control |
+| `.models` · `.model <provider>` | chain info + runtime LLM switch (resets on restart) |
+| `.mission <goal>` · `.code <task>` | multi-agent tasks · audited code → `workspace/code/` |
+| `.exec <shell>` | ⚠️ raw shell (needs `GQ_ALLOW_EXEC=1` + restart) |
+| `.tick` `.send` `.contacts` `.mood` `.reset` `.stats` `.import` `.help` | ops classics |
+
+Contacts get: `!reset` `!mood` `!search` `!news` `!wiki` `!fact` `!translate`.
+
+## Discord autonomous agent (v3.6)
+
+Beyond replies: `DISCORD_WELCOME_DM=1` DMs every new member a brain-written
+greeting (+ `DISCORD_WELCOME_CHAN` for public waves); `DISCORD_AMBIENT=1`
+joins guild threads it finds interesting (questions + her topics + friends,
+tunable `DISCORD_AMBIENT_P`, hourly cap, per-channel cooldown);
+`DISCORD_CATCHUP=1` imports recent guild history on boot. Bots can't join
+servers by themselves — invite link still required, then she's a local.
+
+## Your own model (no cloud needed)
+
+- **llama-server** (GGUF on Termux/PC): point any OpenAI-compatible kind at it:
+  `GQ_PROVIDER=ollama GQ_BASE_URL=http://127.0.0.1:8080/v1` (the `/v1` suffix
+  selects OpenAI-compat mode). Then `.model ollama` anytime.
+- **Ollama** (PC): `GQ_PROVIDER=ollama` (+ `OLLAMA_HOST` if remote).
+- **llamacpp provider** (in-process): `GQ_PROVIDER=llamacpp` with model path
+  configured — no server process at all. Heaviest option, cheapest runtime.
+- Check the live chain anytime: `.models` (also `python bot.py doctor`).
+
 ## Proactive texting (both channels)
 
 The server's ticker (every `GQ_PROACTIVE` seconds, default 300) watches every

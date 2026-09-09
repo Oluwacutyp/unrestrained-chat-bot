@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import sys
 import time
 import urllib.request
@@ -49,6 +50,25 @@ GUILDS = {g.strip() for g in os.environ.get("DISCORD_GUILDS", "").split(",")
 HUMANIZE = os.environ.get("DISCORD_HUMANIZE", "1") == "1"
 HUMAN_WPM = int(os.environ.get("HUMAN_WPM", "45"))
 PERSONA = os.environ.get("DISCORD_PERSONA", "")
+AMBIENT = os.environ.get("DISCORD_AMBIENT", "1") == "1"
+AMBIENT_P = float(os.environ.get("DISCORD_AMBIENT_P", "0.15"))
+AMBIENT_MAXH = int(os.environ.get("DISCORD_AMBIENT_MAXH", "6"))
+AMBIENT_CD = int(os.environ.get("DISCORD_AMBIENT_CD", "600"))
+WELCOME_DM = os.environ.get("DISCORD_WELCOME_DM", "1") == "1"
+WELCOME_CHAN = os.environ.get("DISCORD_WELCOME_CHAN", "")
+CATCHUP = os.environ.get("DISCORD_CATCHUP", "0") == "1"
+CATCHUP_N = int(os.environ.get("DISCORD_CATCHUP_N", "50"))
+_ambient_last: dict = {}   # channel -> last ambient ts
+_ambient_hits: dict = {}   # channel -> [ts this hour]
+_bond_cache: dict = {}     # author -> (ts, level)
+TOPIC_WORDS = frozenset({
+    "code", "coding", "python", "bug", "debug", "program", "server",
+    "trade", "trading", "stocks", "crypto", "bitcoin",
+    "hiking", "hike", "trail", "bike", "biking", "camp", "snow",
+    "food", "recipe", "coffee", "cook", "eat",
+    "nigeria", "pidgin", "lagos", "afrobeats",
+    "music", "game", "gaming", "anime", "movie", "gym", "love",
+})
 
 limiter = RateLimiter(max_per_min=int(os.environ.get("HUMAN_MAXPM", "20")),
                       min_chat_gap=float(os.environ.get("HUMAN_GAP", "4")))
@@ -147,52 +167,9 @@ HELP = ("discord cmds: `.tick` `.send <channel_or_user_id> <msg>` `.contacts` "
 
 
 async def run_owner_cmd(cmd: str, arg: str) -> str:
-    if cmd == "help":
-        return HELP
-    if cmd == "tick":
-        r = await api("/tick", {}, timeout=180)
-        q = r.get("queued", [])
-        return f"queued {len(q)}" if q else "nothing due 😴"
-    if cmd == "send":
-        to, _, msg = arg.partition(" ")
-        if not to or not msg:
-            return "usage: .send <channel_or_user_id> <message>"
-        r = await api("/send", {"channel": "discord", "to": to, "message": msg})
-        return f"queued #{r.get('queued')} → {to} ✉"
-    if cmd == "contacts":
-        r = await api("/contacts")
-        lines = [f"{c['channel']}:{c['chat_id']} ({c['display']})"
-                 for c in r.get("contacts", [])]
-        return "\n".join(lines) or "no contacts yet"
-    if cmd == "mood":
-        m = await api("/mood?conversation_id=discord:owner")
-        return f"{m.get('current')} ({m.get('level')}/10)"
-    if cmd == "bond":
-        parts = arg.split()
-        target = parts[0] if parts else "owner"
-        if len(parts) > 1:
-            lvl = parts[1] if parts[1].lower() == "auto" else None
-            if lvl is None:
-                try:
-                    lvl = int(parts[1])
-                except ValueError:
-                    return "usage: .bond [user] [0-3|auto]"
-            r = await api("/bond", {"channel": "discord", "chat_id": target,
-                                    "level": lvl})
-            b = r.get("bond", {})
-            return f"bond[{target}] → L{b.get('level')} 💾"
-        r = await api(f"/bond?channel=discord&chat_id={target}")
-        b = r.get("bond", {})
-        return (f"bond[{target}]: L{b.get('level')} score {b.get('score')} "
-                f"fric {b.get('friction')} streak {b.get('streak')}d")
-    if cmd == "memory":
-        target = arg.strip() or "owner"
-        r = await api(f"/memory?channel=discord&chat_id={target}")
-        facts = r.get("facts", [])
-        if not facts:
-            return f"no stored memories for {target} 🧠"
-        return " | ".join(f"{f['key']}={f['value']}" for f in facts)[:3500]
-    return HELP
+    """Owner commands via the shared core (import handled in handler)."""
+    from bridges.owner import run_owner_command
+    return await run_owner_command(api, "discord", cmd, arg)
 
 
 async def handle_message(message, client) -> str | None:
@@ -216,6 +193,8 @@ async def handle_message(message, client) -> str | None:
     if message.guild is not None and not guild_allowed(message.guild.id):
         return None
     if not should_reply(message, bot_id):
+        if message.guild is not None:
+            return await maybe_ambient(message, client)
         return None
     is_group = message.guild is not None
     display = getattr(message.author, "display_name", None) or \
@@ -306,6 +285,123 @@ async def deliver_outbox(client) -> list:
     return sent
 
 
+def ambient_score(text: str, level: int = 0) -> float:
+    """0..0.9 — how much Devon wants to join this guild thread. Pure."""
+    s = AMBIENT_P
+    low = (text or "").lower()
+    if "?" in low:
+        s += 0.25  # questions pull her in
+    if any(w in low for w in TOPIC_WORDS):
+        s += 0.20  # her topics: code, outdoors, food, music...
+    s += 0.05 * min(max(level, 0), 3)  # friends get attention
+    if len(low) > 200:
+        s += 0.10  # effort deserves engagement
+    return min(0.9, s)
+
+
+async def maybe_ambient(message, client) -> str | None:
+    """Guild chatter (no mention): join the topic if she feels like it."""
+    if not AMBIENT:
+        return None
+    ch = str(message.channel.id)
+    now = time.time()
+    if now - _ambient_last.get(ch, 0) < AMBIENT_CD:
+        return None
+    hits = [t for t in _ambient_hits.get(ch, []) if now - t < 3600]
+    if len(hits) >= AMBIENT_MAXH:
+        return None
+    lvl = 0
+    try:
+        ck = f"discord:{message.author.id}"
+        c = _bond_cache.get(ck)
+        if not c or now - c[0] > 600:
+            b = await api(f"/bond?channel=discord&chat_id={message.author.id}",
+                          timeout=15)
+            lvl = (b.get("bond") or {}).get("level", 0)
+            _bond_cache[ck] = (now, lvl)
+        else:
+            lvl = c[1]
+    except Exception:
+        pass
+    if random.random() > ambient_score(message.content, lvl):
+        return None
+    _ambient_last[ch] = now
+    hits.append(now)
+    _ambient_hits[ch] = hits
+    display = getattr(message.author, "display_name", None) or str(message.author.id)
+    try:
+        full = await chat_full(message.content, message.author.id, display,
+                               message.channel.id, True)
+        reply = full.get("response") or "(no reply \U0001F605)"
+        await human_send(message.channel, reply,
+                         mood=full.get("mood", "neutral"),
+                         depth=float(full.get("substance", 0) or 0))
+        print(f"\U0001F4AC ambient → #{getattr(message.channel, 'name', ch)}")
+        return reply
+    except Exception as e:
+        await warn("reply_failed", f"discord ambient failed: {e}")
+        return None
+
+
+async def welcome_member(member, client):
+    """New human joined a server: DM them like a curious local + maybe wave publicly."""
+    if not WELCOME_DM and not WELCOME_CHAN:
+        return
+    name = getattr(member, "display_name", "newcomer")
+    guild = getattr(getattr(member, "guild", None), "name", "the server")
+    try:
+        full = await chat_full(
+            f"[EVENT: {name} just joined {guild}. Greet them warmly in ONE short "
+            f"flirty message and ask their name. Never mention you are a bot.]",
+            member.id, name, f"welcome:{getattr(member.guild, 'id', '?')}", True)
+        text = full.get("response") or f"well hey {name} \U0001F440 welcome in!"
+    except Exception:
+        text = f"well hey {name} \U0001F440 welcome in!"
+    if WELCOME_DM:
+        try:
+            await human_send(await member.create_dm(), text)
+        except Exception:
+            pass
+    if WELCOME_CHAN:
+        try:
+            for c in (member.guild.text_channels or []):
+                if c.name == WELCOME_CHAN or str(c.id) == WELCOME_CHAN:
+                    await human_send(c, text)
+                    break
+        except Exception:
+            pass
+
+
+async def discord_catchup(client):
+    """Opt-in (DISCORD_CATCHUP=1): read recent guild history as memory."""
+    if not CATCHUP:
+        return
+    for guild in getattr(client, "guilds", []):
+        if not guild_allowed(guild.id):
+            continue
+        for chan in (getattr(guild, "text_channels", None) or [])[:5]:
+            try:
+                items = []
+                async for m in chan.history(limit=CATCHUP_N):
+                    t = (m.content or "").strip()
+                    if not t:
+                        continue
+                    ts = m.created_at.timestamp() if getattr(m, "created_at", None) else 0
+                    items.append({"role": "assistant" if getattr(m.author, "bot", False)
+                                  else "user", "text": t[:1000], "ts": ts,
+                                  "sender": str(m.author.id)})
+                if not items:
+                    continue
+                items.reverse()
+                await api("/import", {"channel": "discord",
+                                      "chat_id": str(chan.id),
+                                      "display": getattr(chan, "name", "?"),
+                                      "messages": items[:300]}, timeout=120)
+                log.info("catchup #%s: %d", getattr(chan, "name", "?"), len(items))
+            except Exception as e:
+                log.debug("catchup #%s: %s", getattr(chan, "name", "?"), e)
+
+
 async def main():
     if not DISCORD_OK:
         print("discord.py not installed.\n  pip install -U discord.py\nthen re-run.")
@@ -323,6 +419,7 @@ async def main():
         if OWNER_ID:
             print(f"  owner: {OWNER_ID}")
         client.loop.create_task(poll_loop())
+        client.loop.create_task(discord_catchup(client))
 
     async def poll_loop():
         await client.wait_until_ready()
@@ -332,6 +429,17 @@ async def main():
             except Exception as e:
                 log.debug("outbox poll: %s", e)
             await asyncio.sleep(15)
+
+    @client.event
+    async def on_member_join(member):
+        try:
+            if getattr(member, 'bot', False):
+                return
+            if guild_allowed(member.guild.id):
+                print(f"\U0001F44B welcome {getattr(member, 'display_name', '?')}")
+                await welcome_member(member, client)
+        except Exception:
+            log.exception("welcome failed")
 
     @client.event
     async def on_message(message):

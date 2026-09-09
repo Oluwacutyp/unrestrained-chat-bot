@@ -45,6 +45,16 @@ CREATE TABLE IF NOT EXISTS bond_facts (
   PRIMARY KEY (channel, chat_id, fkey, fvalue)
 );
 """
+
+_PERSONA_SCHEMA = """
+CREATE TABLE IF NOT EXISTS chat_persona (
+  channel TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  persona TEXT NOT NULL,
+  updated REAL NOT NULL,
+  PRIMARY KEY (channel, chat_id)
+);
+"""
 _NEW_COLS = {"score": "REAL DEFAULT 0", "friction": "REAL DEFAULT 0",
              "streak": "INTEGER DEFAULT 0", "last_day": "TEXT DEFAULT ''",
              "last_ts": "REAL DEFAULT 0", "burst": "INTEGER DEFAULT 0",
@@ -226,7 +236,7 @@ class BondStore:
                                      timeout=30)
         self._lock = threading.Lock()
         with self._lock:
-            self._conn.executescript(_SCHEMA + _FACTS_SCHEMA)
+            self._conn.executescript(_SCHEMA + _FACTS_SCHEMA + _PERSONA_SCHEMA)
             have = {r[1] for r in self._conn.execute(
                 "PRAGMA table_info(bonds)").fetchall()}
             for col, ddl in _NEW_COLS.items():
@@ -419,5 +429,50 @@ class BondStore:
         with self._lock:
             self._conn.execute(
                 "DELETE FROM bond_facts WHERE channel=? AND chat_id=?",
+                (channel, chat_id))
+            self._conn.commit()
+
+    # ---- per-chat persona overrides ----
+    def get_persona(self, channel: str, chat_id: str) -> str | None:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT persona FROM chat_persona WHERE channel=? AND chat_id=?",
+                (channel, chat_id))
+            row = cur.fetchone()
+            return row[0] if row else None
+
+    def set_persona(self, channel: str, chat_id: str, persona: str):
+        import time as _t
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO chat_persona(channel,chat_id,persona,updated)"
+                " VALUES(?,?,?,?) ON CONFLICT(channel,chat_id) DO UPDATE SET"
+                " persona=excluded.persona, updated=excluded.updated",
+                (channel, chat_id, persona, _t.time()))
+            self._conn.commit()
+
+    def clear_persona(self, channel: str | None = None,
+                      chat_id: str | None = None):
+        with self._lock:
+            if channel and chat_id:
+                self._conn.execute(
+                    "DELETE FROM chat_persona WHERE channel=? AND chat_id=?",
+                    (channel, chat_id))
+            else:
+                self._conn.execute("DELETE FROM chat_persona")
+            self._conn.commit()
+
+    def list_personas(self) -> list[tuple[str, str, str]]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT channel,chat_id,persona FROM chat_persona ORDER BY channel,chat_id")
+            return [(r[0], r[1], r[2]) for r in cur.fetchall()]
+
+    def zero_bond(self, channel: str, chat_id: str):
+        """Deep forget: closeness wiped, back to stranger (counts kept)."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE bonds SET score=0, friction=0, level=0, manual=0,"
+                " streak=0, burst=0 WHERE channel=? AND chat_id=?",
                 (channel, chat_id))
             self._conn.commit()

@@ -20,6 +20,11 @@ API is backward compatible with whatsapp.js:
   POST /translate {text, target?} → English ↔ Naija pidgin translation
   POST /warn {message, kind?, channel?} → self-DM alert to owner
   POST /import {channel, chat_id, messages[]} → ingest past chats
+  GET|POST /persona        → per-chat persona overrides + global default
+  GET  /models | POST /model {primary} → LLM chain info + runtime switch
+  POST /forget {channel, chat_id, deep?} → wipe dossier (+bond)
+  POST /code {task, run?}  → agent writes code to workspace (audited)
+  POST /exec {cmd}         → shell (needs GQ_ALLOW_EXEC=1) ⚠️
 GET / serves the single-file chat UI (mobile-first, Termux-friendly).
 """
 from __future__ import annotations
@@ -132,13 +137,30 @@ class _Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(parsed.query)
         cid = q.get("conversation_id", ["default"])[0]
-        cfg, _, _, _, companion = self.stack
+        cfg, router, memory, _, companion = self.stack
         if parsed.path == "/":
             return self._html(UI_HTML)
         if parsed.path in ("/health", "/status"):
             return self._json({"status": "online", "version": __version__,
                                "provider": getattr(cfg, "llm_provider", "auto"),
-                               "persona": cfg.persona})
+                               "persona": cfg.persona, **memory.stats()})
+        if parsed.path == "/models":
+            with self.lock:
+                info = {"primary": getattr(router, "primary", "?"),
+                        "chain": router.chain() if hasattr(router, "chain") else [],
+                        "usage": memory.stats()}
+            return self._json(info)
+        if parsed.path == "/persona":
+            channel = q.get("channel", [""])[0]
+            chat_id = q.get("chat_id", [""])[0]
+            with self.lock:
+                if channel and chat_id:
+                    ov = companion.bonds.get_persona(channel, chat_id)
+                    return self._json({"persona": ov or cfg.persona,
+                                       "override": bool(ov)})
+                ovs = companion.bonds.list_personas()
+            return self._json({"default": cfg.persona,
+                               "overrides": [f"{c}:{i}:{p}" for c, i, p in ovs]})
         if parsed.path == "/mood":
             with self.lock:
                 return self._json(companion.moods.snapshot(cid))
@@ -189,9 +211,13 @@ class _Handler(BaseHTTPRequestHandler):
                         self.outbox.upsert_contact(data["channel"], str(data["chat_id"]),
                                                    data.get("display", ""),
                                                    touch_inbound=True)
+                    _p = data.get("persona") or None
+                    if not _p and data.get("channel") and data.get("chat_id"):
+                        _p = companion.bonds.get_persona(
+                            data["channel"], str(data["chat_id"]))
                     out = companion.chat(
                         msg, cid,
-                        persona=data.get("persona"),
+                        persona=_p,
                         use_search=data.get("use_search", False),
                         image_data=data.get("image"),
                         sender_name=data.get("sender_name"),
@@ -250,6 +276,93 @@ class _Handler(BaseHTTPRequestHandler):
                         f"{goal}\n\nTEXT: {text}",
                         agent="companion").text.strip()
                 return self._json({"translation": t})
+            if path == "/model":
+                want = (data.get("primary") or "").strip().lower()
+                if not want:
+                    return self._json({"error": "need {primary}"}, 400)
+                known = {"openai", "groq", "anthropic", "gemini", "ollama",
+                         "deepseek", "openrouter", "together", "huggingface",
+                         "hf", "pollinations", "llamacpp", "heuristic"}
+                if want not in known:
+                    return self._json({"error": "unknown provider "
+                                                f"'{want}' ({sorted(known)})"},
+                                      400)
+                with self.lock:
+                    router.primary = want
+                return self._json({"primary": want, "chain": router.chain()})
+            if path == "/persona":
+                from godquant.companion.personas import PERSONAS
+                ch = data.get("channel")
+                cid2 = data.get("chat_id")
+                name = (data.get("persona") or "").strip().lower()
+                if ch and cid2:
+                    if name == "clear":
+                        with self.lock:
+                            companion.bonds.clear_persona(ch, str(cid2))
+                        return self._json({"cleared": True})
+                    if name not in PERSONAS:
+                        return self._json({"error": "unknown persona"}, 400)
+                    with self.lock:
+                        companion.bonds.set_persona(ch, str(cid2), name)
+                    return self._json({"persona": name, "override": True})
+                if name not in PERSONAS:
+                    return self._json({"error": "need {channel, chat_id} or valid global persona"}, 400)
+                with self.lock:
+                    cfg.persona = name
+                return self._json({"default": name})
+            if path == "/forget":
+                ch, cid2 = data.get("channel"), data.get("chat_id")
+                if not ch or not cid2:
+                    return self._json({"error": "need {channel, chat_id}"}, 400)
+                deep = bool(data.get("deep"))
+                with self.lock:
+                    facts = companion.bonds.get_facts(ch, str(cid2))
+                    companion.bonds.clear_facts(ch, str(cid2))
+                    if deep:
+                        companion.bonds.zero_bond(ch, str(cid2))
+                return self._json({"facts": len(facts), "deep": deep})
+            if path == "/code":
+                from godquant.dev.sandbox import audit, run_python
+                task = (data.get("task") or "").strip()
+                if not task:
+                    return self._json({"error": "need {task}"}, 400)
+                want_run = bool(data.get("run"))
+                with self.lock:
+                    code = router.complete(
+                        "You are a senior Python dev. Output ONLY runnable Python code, "
+                        "no markdown fences, no explanation. Keep it dependency-free.",
+                        f"TASK: {task}", agent="developer").text.strip()
+                for fence in ("```python", "```"):
+                    code = code.replace(fence, "")
+                code = code.strip()[:12000]
+                flags = audit(code)
+                slug = "".join(c if c.isalnum() else "_" for c in task[:30]).strip("_") or "task"
+                path = cfg.resolved_workspace() / "code" / f"{slug}.py"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(code)
+                result = {"path": str(path), "audit": flags,
+                          "summary": code[:1500]}
+                if want_run and not flags:
+                    with self.lock:
+                        result["run"] = run_python(code, timeout=30)
+                elif want_run:
+                    result["run"] = {"error": f"blocked: {flags}"}
+                return self._json(result)
+            if path == "/exec":
+                import subprocess as _sp
+                if not cfg.allow_exec:
+                    return self._json({"error": "disabled — set GQ_ALLOW_EXEC=1 and restart"}, 403)
+                cmd = (data.get("cmd") or "").strip()
+                if not cmd:
+                    return self._json({"error": "need {cmd}"}, 400)
+                try:
+                    p = _sp.run(cmd, shell=True, capture_output=True, text=True,
+                                timeout=int(data.get("timeout", 30)),
+                                cwd=str(cfg.resolved_workspace()))
+                    out = (p.stdout + p.stderr)[-3000:]
+                    return self._json({"exit": p.returncode, "output": out})
+                except _sp.TimeoutExpired:
+                    return self._json({"exit": -1, "output": "TIMEOUT"})
             if path == "/warn":
                 msg = (data.get("message") or "").strip()[:500]
                 if not msg:

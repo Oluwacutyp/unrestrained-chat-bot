@@ -18,6 +18,8 @@ const baileys = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const axios = require('axios');
 const pino = require('pino');
+const ownerCmd = require('./wa_owner');
+const OWNER_NUMBER = (process.env.WA_OWNER_NUMBER || '').replace(/[^0-9]/g, '');
 
 console.log('\n' + '='.repeat(60));
 console.log('🤖 WhatsApp Baileys bridge (no browser) starting...');
@@ -102,6 +104,11 @@ async function warnSelf(kind, msg) {
             message: ('' + msg).slice(0, 400)
         }, { timeout: 10000 });
     } catch (e) { /* brain down — nothing to do */ }
+}
+
+async function waPost(path, payload, timeoutMs) {
+    const res = await axios.post(`${AI_SERVER_URL}${path}`, payload || {}, { timeout: timeoutMs || 60000 });
+    return res.data;
 }
 
 // ---------- brain ----------
@@ -200,6 +207,13 @@ async function handleMessage(sock, m) {
     if (isSpamming(jid)) {
         console.log('⏭ Rate limited — message too soon');
         return;
+    }
+    // Owner commands (WA_OWNER_NUMBER only, .-prefixed)
+    if (OWNER_NUMBER && number === OWNER_NUMBER && text.startsWith('.')) {
+        const out = await ownerCmd.handleOwnerCommand(text, {
+            post: waPost, channel: 'whatsapp', chatId: jid, fetchHistory: null
+        });
+        if (out) { await humanSend(sock, jid, out, m); return; }
     }
     console.log(`\n📨 Message from ${name}:`);
     console.log(`   "${text}"`);

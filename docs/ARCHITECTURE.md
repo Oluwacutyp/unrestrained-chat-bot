@@ -45,6 +45,13 @@ fits the same API; SqliteVectorIndex/Chroma later).
   fire via tick, daily repeats), spending ledger (per-cat totals),
   health log, world bibles (append/replace, injected as canon into the
   `/chat` system prompt via `bible=`), today's events in the brief.
+- **v4.4 personal model ✅ shipped:** `/model` accepts `{primary?, model?,
+  gguf?}` and persists via `save_config` (providers rebuild per call, so
+  the switch is instant); `.model load|list` on all bridges; GGUF
+  download accepts any `user/repo/file.gguf` (+`HF_TOKEN` auth); SFT
+  export in messages + ShareGPT + Alpaca; `docs/colab_train.ipynb`
+  (QLoRA SFT→DPO on free T4, pushes adapter + GGUF); author watermark
+  `oluwacutyp / peacethefirst1` in CLI, dataset cards, notebook.
 
 ## Reliability bar (every phase)
 

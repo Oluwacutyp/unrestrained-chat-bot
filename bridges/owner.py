@@ -17,12 +17,12 @@ HELP = {
                  "`.send <chat> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                  "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                  "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.train …` `.good` `.bad` `.cal …` `.spend …` `.ledger` `.health …` `.bible …` `.help`"),
+                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.train …` `.good` `.bad` `.cal …` `.spend …` `.ledger` `.health …` `.bible …` `.model …` `.help`"),
     "discord": ("discord cmds: `.mission <goal>` `.code <task>` `.exec <shell>` `.tick` "
                 "`.send <id> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                 "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                 "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.train …` `.good` `.bad` `.cal …` `.spend …` `.ledger` `.health …` `.bible …` `.help`"),
+                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.train …` `.good` `.bad` `.cal …` `.spend …` `.ledger` `.health …` `.bible …` `.model …` `.help`"),
 }
 
 
@@ -123,6 +123,10 @@ async def run_owner_command(api, channel: str, cmd: str, arg: str,
         r = await api("/models")
         chain = r.get("chain", [])
         lines = [f"primary: {r.get('primary')}"]
+        if r.get("model"):
+            lines.append(f"model: {r['model']}")
+        if r.get("gguf"):
+            lines.append(f"gguf: {r['gguf']}")
         lines += [f"{'→' if c == r.get('primary') else ' '} {c}"
                   for c in chain]
         use = r.get("usage") or {}
@@ -131,9 +135,35 @@ async def run_owner_command(api, channel: str, cmd: str, arg: str,
                          f"${use.get('spend_usd', 0)}")
         return "\n".join(lines)
     if cmd == "model":
-        if not arg:
-            return "usage: .model <provider> (runtime switch, resets on restart)"
-        r = await api("/model", {"primary": arg.strip().lower()})
+        toks = arg.split()
+        if not toks:
+            return ("usage: .model <provider> | .model load "
+                    "<user/model|path.gguf> [provider] | .model list")
+        if toks[0].lower() == "list":
+            r = await api("/models")
+            chain = r.get("chain", [])
+            lines = [f"primary: {r.get('primary')}"]
+            if r.get("model"):
+                lines.append(f"model: {r['model']}")
+            if r.get("gguf"):
+                lines.append(f"gguf: {r['gguf']}")
+            lines += [f"{'→' if c == r.get('primary') else ' '} {c}"
+                      for c in chain]
+            return "\n".join(lines)
+        if toks[0].lower() == "load" and len(toks) > 1:
+            target = toks[1]
+            if target.lower().endswith(".gguf"):
+                payload = {"gguf": target}
+            else:
+                payload = {"model": target,
+                           "primary": (toks[2] if len(toks) > 2
+                                       else "huggingface").lower()}
+            r = await api("/model", payload)
+            if r.get("error"):
+                return f"model failed: {r['error']}"
+            return (f"loaded → {r.get('model') or r.get('gguf')} ⚡ "
+                    f"(saved, survives restart)")
+        r = await api("/model", {"primary": toks[0].lower()})
         if r.get("error"):
             return f"model failed: {r['error']}"
         return f"primary → {r.get('primary')} ⚡"

@@ -21,7 +21,7 @@ API is backward compatible with whatsapp.js:
   POST /warn {message, kind?, channel?} → self-DM alert to owner
   POST /import {channel, chat_id, messages[]} → ingest past chats
   GET|POST /persona        → per-chat persona overrides + global default
-  GET  /models | POST /model {primary} → LLM chain info + runtime switch
+  GET  /models | POST /model {primary?, model?, gguf?} (persisted) → LLM chain info + runtime switch
   POST /forget {channel, chat_id, deep?} → wipe dossier (+bond)
   POST /code {task, run?}  → agent writes code to workspace (audited)
   POST /exec {cmd}         → shell (needs GQ_ALLOW_EXEC=1) ⚠️
@@ -154,6 +154,8 @@ class _Handler(BaseHTTPRequestHandler):
         if parsed.path == "/models":
             with self.lock:
                 info = {"primary": getattr(router, "primary", "?"),
+                        "model": getattr(cfg, "llm_model", "") or None,
+                        "gguf": getattr(cfg, "model_path", "") or None,
                         "chain": router.chain() if hasattr(router, "chain") else [],
                         "usage": memory.stats()}
             return self._json(info)
@@ -351,18 +353,45 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json({"translation": t})
             if path == "/model":
                 want = (data.get("primary") or "").strip().lower()
-                if not want:
-                    return self._json({"error": "need {primary}"}, 400)
+                model = (data.get("model") or "").strip()
+                gguf = (data.get("gguf") or "").strip()
                 known = {"openai", "groq", "anthropic", "gemini", "ollama",
                          "deepseek", "openrouter", "together", "huggingface",
                          "hf", "pollinations", "llamacpp", "heuristic"}
-                if want not in known:
+                if want and want not in known:
                     return self._json({"error": "unknown provider "
                                                 f"'{want}' ({sorted(known)})"},
                                       400)
+                if not want and not model and not gguf:
+                    return self._json(
+                        {"error": "need {primary and/or model and/or gguf}"},
+                        400)
+                gp = None
+                if gguf:
+                    from pathlib import Path as _P
+                    gp = _P(gguf).expanduser()
+                    if gp.suffix.lower() != ".gguf" or not gp.exists():
+                        return self._json(
+                            {"error": f"gguf not found: {gguf}"}, 400)
+                    if not want:
+                        want = "llamacpp"
                 with self.lock:
-                    router.primary = want
-                return self._json({"primary": want, "chain": router.chain()})
+                    if want:
+                        router.primary = want
+                    if model:
+                        cfg.llm_model = model
+                    if gp is not None:
+                        cfg.model_path = str(gp)
+                    try:
+                        from godquant.config import save_config as _save
+                        _saved = str(_save(cfg))
+                    except Exception as e:
+                        _saved = f"save failed: {e}"
+                return self._json({"primary": router.primary,
+                                    "model": cfg.llm_model or None,
+                                    "gguf": cfg.model_path or None,
+                                    "saved": _saved,
+                                    "chain": router.chain()})
             if path == "/persona":
                 from godquant.companion.personas import PERSONAS
                 ch = data.get("channel")

@@ -79,10 +79,19 @@ class LlamaCppProvider(BaseProvider):
 
 
 def download_model(key: str, dest_dir: str | Path = MODELS_DIR) -> Path:
-    """Download a GGUF from Hugging Face with a progress line. Stdlib-only."""
-    if key not in SMALL_MODELS:
-        raise ValueError(f"unknown model '{key}'. Available: {sorted(SMALL_MODELS)}")
-    repo, fname, size = SMALL_MODELS[key]
+    """Download a GGUF from Hugging Face with a progress line. Stdlib-only.
+
+    key is a SMALL_MODELS preset or 'user/repo/file.gguf' for any public
+    (or HF_TOKEN-authed) repo — e.g. your own Colab-trained model.
+    """
+    if key in SMALL_MODELS:
+        repo, fname, size = SMALL_MODELS[key]
+    elif key.count("/") == 2 and key.lower().endswith(".gguf"):
+        repo, fname = key.rsplit("/", 1)
+        size = "custom"
+    else:
+        raise ValueError(f"unknown model '{key}'. Available: "
+                         f"{sorted(SMALL_MODELS)} or user/repo/file.gguf")
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
     target = dest / fname
@@ -90,7 +99,12 @@ def download_model(key: str, dest_dir: str | Path = MODELS_DIR) -> Path:
         return target
     url = f"https://huggingface.co/{repo}/resolve/main/{fname}?download=true"
     log.info("downloading %s (%s)...", fname, size)
-    req = urllib.request.Request(url, headers={"User-Agent": "godquant/1.0"})
+    import os as _os
+    _tok = _os.environ.get("HF_TOKEN", "")
+    _headers = {"User-Agent": "godquant/1.0"}
+    if _tok:
+        _headers["Authorization"] = f"Bearer {_tok}"
+    req = urllib.request.Request(url, headers=_headers)
     with urllib.request.urlopen(req) as r, open(target, "wb") as f:
         total = int(r.headers.get("Content-Length", 0))
         got = 0
@@ -111,5 +125,6 @@ def list_models() -> str:
     for key, (repo, fname, size) in SMALL_MODELS.items():
         have = "✓" if (MODELS_DIR / fname).exists() else " "
         lines.append(f"[{have}] {key:<18} {size:<14} {repo}/{fname}")
+    lines.append("custom GGUF: bot.py models --download user/repo/file.gguf")
     lines.append(f"\nmodels dir: {MODELS_DIR}")
     return "\n".join(lines)

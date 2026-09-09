@@ -44,7 +44,7 @@ async function main() {
         if (path === '/code') return { path: '/w/code/x.py', summary: 'ok' };
         if (path === '/exec') return { exit: 0, output: 'hi\n' };
         if (path === '/models') return { primary: 'groq', chain: ['groq', 'heuristic'], usage: { llm_calls: 3, spend_usd: 0 } };
-        if (path === '/model') return payload.primary === 'nope' ? { error: 'unknown' } : { primary: payload.primary };
+        if (path === '/model') return payload.primary === 'nope' ? { error: 'unknown' } : { primary: payload.primary || 'llamacpp', model: payload.model, gguf: payload.gguf };
         if (path === '/persona' && payload && payload.persona) return { default: payload.persona };
         if (path === '/persona') return { default: 'devon', overrides: [] };
         if (path.startsWith('/persona?')) return { persona: 'alex', override: true };
@@ -113,6 +113,9 @@ async function main() {
     has(await run('.models'), 'groq', 'models');
     has(await run('.model groq'), 'groq', 'model ok');
     has(await run('.model nope'), 'failed', 'model bad');
+    has(await run('.model list'), 'groq', 'model list');
+    has(await run('.model load u/m'), 'u/m', 'model load');
+    has(await run('.model load /x/y.gguf'), 'y.gguf', 'model load gguf');
     has(await run('.persona'), 'devon', 'persona show');
     has(await run('.persona alex'), 'alex', 'persona global');
     has(await run('.persona 42'), 'override', 'persona chat show');

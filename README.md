@@ -51,6 +51,14 @@ One brain, two bridges — both **reply and deliver**, so the bot texts first:
 | `bridges/whatsapp.js` (Node, QR login) | ✅ DMs + groups | ✅ via outbox poll | **PC** (needs Chrome) |
 | `bridges/telegram_userbot.py` (MTProto, **your own account**) | ✅ DMs + groups | ✅ via outbox poll | **Termux ✅** |
 
+v4.4 personal model: **load any HuggingFace model at runtime**
+(`.model load user/model`, `.model list`, persisted across restarts),
+**custom GGUF loop** (`bot.py models --download user/repo/model.gguf` →
+`.model load ~/….gguf`), SFT export in **messages + ShareGPT + Alpaca**
+formats, and a **one-click Colab notebook** (`docs/colab_train.ipynb` —
+open it from GitHub straight into Colab, train SFT+DPO with QLoRA on a
+free T4, push the adapter + GGUF back to your account).
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Oluwacutyp/unrestrained-chat-bot/blob/arena/01a08284-unrestrained-chat-bot/docs/colab_train.ipynb)
 v4.3 life-OS + creative: **calendar with due-date reminders**
 (`.cal add <when> <title>`, daily repeats, fired by the tick loop),
 **spending ledger** (`.spend 2500 NGN food …`, `.ledger [cat]` with totals),

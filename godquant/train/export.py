@@ -39,7 +39,9 @@ def build_packs(workspace: str | Path) -> dict:
     prefs = _read_jsonl(d / "prefs.jsonl")
 
     sft_n, skip_n = 0, 0
-    with open(d / "sft.jsonl", "w") as f:
+    with open(d / "sft.jsonl", "w") as f, \
+            open(d / "sft_sharegpt.jsonl", "w") as g, \
+            open(d / "sft_alpaca.jsonl", "w") as h:
         for t in trajs:
             if t.get("kind") == "mission":
                 u, a = t.get("goal", ""), t.get("summary", "")
@@ -52,6 +54,12 @@ def build_packs(workspace: str | Path) -> dict:
                 {"role": "system", "content": SYS_LINE},
                 {"role": "user", "content": u[:2000]},
                 {"role": "assistant", "content": a[:4000]}]}) + "\n")
+            g.write(json.dumps({"conversations": [
+                {"from": "system", "value": SYS_LINE},
+                {"from": "human", "value": u[:2000]},
+                {"from": "gpt", "value": a[:4000]}]}) + chr(10))
+            h.write(json.dumps({"instruction": u[:2000], "input": "",
+                                "output": a[:4000]}) + chr(10))
             sft_n += 1
     dpo_n = 0
     with open(d / "dpo.jsonl", "w") as f:
@@ -62,13 +70,19 @@ def build_packs(workspace: str | Path) -> dict:
                                     "chosen": p["chosen"][:4000],
                                     "rejected": p["rejected"][:4000]}) + "\n")
                 dpo_n += 1
-    card = (f"# personal-ai training pack\n\nexported: "
-            f"{time.strftime('%Y-%m-%d %H:%M')} (local)\n\n"
+    card = (f"# personal-ai training pack\n\n"
+            f"crafted with the unrestrained-chat-bot by oluwacutyp / "
+            f"peacethefirst1\n\n"
+            f"exported: {time.strftime('%Y-%m-%d %H:%M')} (local)\n\n"
             f"- sft rows: {sft_n} (skipped {skip_n} incomplete)\n"
             f"- dpo pairs: {dpo_n}\n\n"
             f"Source: on-device trajectories (chats + missions) and owner "
-            f"verdicts (.good/.bad). SFT rows use OpenAI messages format, "
-            f"TRL SFTTrainer-ready; DPO rows are prompt/chosen/rejected.\n")
+            f"verdicts (.good/.bad).\n\n"
+            f"Formats (all TRL-ready):\n"
+            f"- sft.jsonl — OpenAI messages format\n"
+            f"- sft_sharegpt.jsonl — ShareGPT conversations format\n"
+            f"- sft_alpaca.jsonl — Alpaca instruction/input/output\n"
+            f"- dpo.jsonl — prompt/chosen/rejected pairs\n")
     (d / "README.md").write_text(card)
     return {"sft": sft_n, "dpo": dpo_n, "skipped": skip_n,
-            "dir": str(d), "files": ["sft.jsonl", "dpo.jsonl", "README.md"]}
+            "dir": str(d), "files": ["sft.jsonl", "sft_sharegpt.jsonl", "sft_alpaca.jsonl", "dpo.jsonl", "README.md"]}

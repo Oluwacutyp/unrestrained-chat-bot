@@ -473,7 +473,7 @@ def cmd_config(args, cfg, memory, router, orch):
 
 # ---------------- parser ----------------
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="gq", description=f"God Quant AI Developer v{__version__} — multi-agent quant system")
+    p = argparse.ArgumentParser(prog="gq", description=f"GodQuant v{__version__} by oluwacutyp / peacethefirst1 — personal AI, memory-first")
     p.add_argument("--provider", help="llm provider (auto|openai|groq|huggingface|pollinations|anthropic|gemini|deepseek|openrouter|ollama|llamacpp|heuristic)")
     p.add_argument("--model", help="model override")
     p.add_argument("--offline", action="store_true", help="force offline mode (no network/keys)")

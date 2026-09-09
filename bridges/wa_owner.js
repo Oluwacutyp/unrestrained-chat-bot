@@ -156,13 +156,34 @@ async function handleOwnerCommand(text, ctx) {
         const r = await post('/models', null);
         const chain = r.chain || [];
         const lines = ['primary: ' + r.primary];
+        if (r.model) lines.push('model: ' + r.model);
+        if (r.gguf) lines.push('gguf: ' + r.gguf);
         chain.forEach(c => lines.push((c === r.primary ? '→ ' : '  ') + c));
         if (r.usage) lines.push(`calls: ${r.usage.llm_calls || 0} $${r.usage.spend_usd || 0}`);
         return lines.join('\n');
     }
     if (cmd === 'model') {
-        if (!arg) return 'usage: .model <provider> (runtime switch, resets on restart)';
-        const r = await post('/model', { primary: arg.toLowerCase() });
+        const toks = arg.split(/\s+/).filter(Boolean);
+        if (!toks.length) return 'usage: .model <provider> | .model load <user/model|path.gguf> [provider] | .model list';
+        if (toks[0].toLowerCase() === 'list') {
+            const r = await post('/models', null);
+            const chain = r.chain || [];
+            const lines = ['primary: ' + r.primary];
+            if (r.model) lines.push('model: ' + r.model);
+            if (r.gguf) lines.push('gguf: ' + r.gguf);
+            chain.forEach(c => lines.push((c === r.primary ? '→ ' : '  ') + c));
+            return lines.join('\n');
+        }
+        if (toks[0].toLowerCase() === 'load' && toks.length > 1) {
+            const t = toks[1];
+            const payload = t.toLowerCase().endsWith('.gguf')
+                ? { gguf: t }
+                : { model: t, primary: (toks[2] || 'huggingface').toLowerCase() };
+            const r = await post('/model', payload);
+            if (r.error) return 'model failed: ' + r.error;
+            return 'loaded → ' + (r.model || r.gguf) + ' ⚡ (saved, survives restart)';
+        }
+        const r = await post('/model', { primary: toks[0].toLowerCase() });
         if (r.error) return 'model failed: ' + r.error;
         return 'primary → ' + r.primary + ' ⚡';
     }

@@ -53,6 +53,14 @@ class TrajectoryLogger:
                                   "chosen": reply[:4000] if v == "good" else "",
                                   "rejected": reply[:4000] if v == "bad" else ""})
 
+    def log_history(self, user: str, response: str, chat: str = "",
+                    chat_type: str = ""):
+        self._append(self.traj, {"ts": time.time(), "kind": "history",
+                                 "chat": (chat or "")[:120],
+                                 "chat_type": chat_type,
+                                 "user": (user or "")[:2000],
+                                 "response": (response or "")[:4000]})
+
     def stats(self) -> dict:
         out = {"trajectories": 0, "prefs": 0, "pairs": 0, "bytes": 0}
         try:

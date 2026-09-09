@@ -51,6 +51,10 @@ One brain, two bridges — both **reply and deliver**, so the bot texts first:
 | `bridges/whatsapp.js` (Node, QR login) | ✅ DMs + groups | ✅ via outbox poll | **PC** (needs Chrome) |
 | `bridges/telegram_userbot.py` (MTProto, **your own account**) | ✅ DMs + groups | ✅ via outbox poll | **Termux ✅** |
 
+v4.5 history harvest: **backfill training data from every Telegram
+chat** (`python bridges/tg_history.py --list` then `--all` — DMs, groups,
+channels, resumable per chat, no `.good`/`.bad` needed) straight into the
+same `sft.jsonl` the Colab notebook trains on.
 v4.4 personal model: **load any HuggingFace model at runtime**
 (`.model load user/model`, `.model list`, persisted across restarts),
 **custom GGUF loop** (`bot.py models --download user/repo/model.gguf` →

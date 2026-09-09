@@ -52,6 +52,12 @@ fits the same API; SqliteVectorIndex/Chroma later).
   export in messages + ShareGPT + Alpaca; `docs/colab_train.ipynb`
   (QLoRA SFT→DPO on free T4, pushes adapter + GGUF); author watermark
   `oluwacutyp / peacethefirst1` in CLI, dataset cards, notebook.
+- **v4.5 history harvest ✅ shipped:** `bridges/tg_history.py` walks all
+  dialogs (DMs/groups/channels) via the userbot session; pure pairing
+  logic in `godquant/train/history.py` (sliding different-sender pairs,
+  channel→Alpaca style rows, dedupe, per-chat resume state);
+  `TrajectoryLogger.log_history` lands rows in `trajectories.jsonl` so
+  export/push/Colab work unchanged. No ratings needed.
 
 ## Reliability bar (every phase)
 

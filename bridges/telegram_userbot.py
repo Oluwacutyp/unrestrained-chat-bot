@@ -439,7 +439,7 @@ async def main():
 
     asyncio.create_task(outbox_loop())
     print(f"✓ userbot live (dm allowlist: {sorted(ALLOW) or 'everyone'}, "
-          f"groups: {GROUPS}, poll: {POL}s, humanize: {HUMANIZE})")
+          f"groups: {GROUPS}, poll: {POLL}s, humanize: {HUMANIZE})")
     await client.run_until_disconnected()
 
 

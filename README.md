@@ -51,6 +51,12 @@ One brain, two bridges — both **reply and deliver**, so the bot texts first:
 | `bridges/whatsapp.js` (Node, QR login) | ✅ DMs + groups | ✅ via outbox poll | **PC** (needs Chrome) |
 | `bridges/telegram_userbot.py` (MTProto, **your own account**) | ✅ DMs + groups | ✅ via outbox poll | **Termux ✅** |
 
+v4.3 life-OS + creative: **calendar with due-date reminders**
+(`.cal add <when> <title>`, daily repeats, fired by the tick loop),
+**spending ledger** (`.spend 2500 NGN food …`, `.ledger [cat]` with totals),
+**health log** (`.health sleep 7h`, `.healthlog`), **world bibles**
+(persistent canon injected into her system prompt, `.bible save|new|list`),
+today's events inside the morning brief.
 v4.2 personal-model path: **on-device trajectory + preference collection**
 (every chat/mission logged, `.good`/`.bad` bank DPO pairs, `GQ_COLLECT=0`
 opts out), `gq.py export-training` (SFT + DPO packs + dataset card),

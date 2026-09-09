@@ -20,7 +20,8 @@ const HELP = 'wa cmds: `.mission <goal>` `.code <task>` `.exec <shell>` `.tick` 
     '`.snooze <id> <when>` ' +
     '`.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` ' +
     '`.project <goal>` `.projects` `.resume <id>` `.train …` ' +
-    '`.good` `.bad` `.help`';
+    '`.good` `.bad` `.cal …` `.spend …` `.ledger` `.health …` ' +
+    '`.bible …` `.help`';
 
 function parseOwnerCommand(text) {
     const t = (text || '').trim();
@@ -311,6 +312,67 @@ async function handleOwnerCommand(text, ctx) {
         }
         return 'usage: .train status|export|push <user/repo>|script [out]';
     }
+    if (cmd === 'cal') {
+        const sp = arg.indexOf(' ');
+        const sub = (sp < 0 ? arg : arg.slice(0, sp)).toLowerCase() || 'list';
+        const rest = sp < 0 ? '' : arg.slice(sp + 1).trim();
+        if (sub === 'add' && rest) {
+            const m = rest.match(/^(in\s+\d+\s*[mhd]|tomorrow\s+\d{1,2}:\d{2}|every\s+day\s+\d{1,2}:\d{2}|\d{1,2}:\d{2})\s+(.+)$/i);
+            const w = m ? parseWhen(m[1]) : null;
+            if (!m || !w) return 'usage: .cal add <in 2h · tomorrow 7:00 · every day 8:00 · 19:30> <title>';
+            const r = await post('/cal', { action: 'add', title: m[2].trim(), ts: w.due, repeat: w.repeat, channel: channel, chat_id: ctx.chatId || 'me' });
+            return `📅 #${r.id} ${fmtDue(w.due)}${w.repeat ? ' ↻' + w.repeat : ''}`;
+        }
+        if (sub === 'list' || !arg) {
+            const r = await post('/cal', { action: 'list' });
+            const es = r.events || [];
+            if (!es.length) return 'no upcoming events 📅';
+            return es.map(e => `#${e.id} ${fmtDue(e.ts)}${e.repeat ? ' ↻' : ''}${e.done ? ' ✅' : ''} — ${e.title.slice(0, 80)}`).join('\n').slice(0, 3000);
+        }
+        if ((sub === 'done' || sub === 'del') && /^\d+$/.test(rest)) {
+            const r = await post('/cal', { action: sub, id: parseInt(rest, 10) });
+            return r.ok ? 'done ✅' : 'no such event';
+        }
+        return 'usage: .cal add <when> <title> | .cal | .cal done|del <id>';
+    }
+    if (cmd === 'spend') {
+        const toks = arg.split(/\s+/).filter(Boolean);
+        const amt = toks.length ? parseFloat(toks[0].replace(/,/g, '')) : NaN;
+        if (!toks.length || isNaN(amt)) return 'usage: .spend <amount> [CUR] <cat> [note...]';
+        const rest = toks.slice(1);
+        let cur = '';
+        if (rest.length && /^[A-Za-z]{3}$/.test(rest[0])) cur = rest.shift().toUpperCase();
+        if (!rest.length) return 'usage: .spend <amount> [CUR] <cat> [note...]';
+        const cat = rest.shift().toLowerCase();
+        const note = rest.join(' ');
+        const r = await post('/ledger', { action: 'add', amount: amt, currency: cur, cat: cat, note: note });
+        return `💸 #${r.id} ${amt} ${cur} [${cat}]` + (note ? ' ' + note.slice(0, 60) : '');
+    }
+    if (cmd === 'ledger') {
+        const cat = arg.trim().toLowerCase();
+        const r = await post('/ledger', { action: 'list', cat: cat });
+        const es = r.entries || [];
+        const t = await post('/ledger', { action: 'total', cat: cat });
+        if (!es.length) return 'ledger empty 💸';
+        const lines = es.slice(0, 15).map(e => `#${e.id} ${e.amount} ${e.currency} [${e.cat}] ${(e.note || '').slice(0, 50)}`.trim());
+        lines.push(`Σ ${t.total || 0}` + (cat ? ` [${cat}]` : ''));
+        return lines.join('\n').slice(0, 3000);
+    }
+    if (cmd === 'health') {
+        const sp = arg.indexOf(' ');
+        if (sp < 0) return 'usage: .health <metric> <value>';
+        await post('/health', { action: 'log', metric: arg.slice(0, sp), value: arg.slice(sp + 1).trim() });
+        return `❤️ logged ${arg.slice(0, sp).toLowerCase()} = ${arg.slice(sp + 1).trim().slice(0, 60)}`;
+    }
+    if (cmd === 'healthlog') {
+        const r = await post('/health', { action: 'list', metric: arg.trim() });
+        const es = r.entries || [];
+        if (!es.length) return 'no health logs ❤️';
+        return es.slice(0, 15).map(e => `${e.metric}: ${e.value.slice(0, 60)}`).join('\n').slice(0, 2000);
+    }
+    if (cmd === 'bible') {
+        return await bibleCmd(post, arg);
+    }
     if (cmd === 'fetch') {
         if (!arg) return 'usage: .fetch <url>';
         const r = await post('/fetch', { url: arg }, 60000);
@@ -386,6 +448,27 @@ async function noteCmd(post, arg) {
     const r = await post('/note', { action: 'get', name: sub });
     if (r.error) return 'no such note — `.note list` to see all';
     return (`📝 ${sub}:\n` + (r.body || '')).slice(0, 3200);
+}
+
+async function bibleCmd(post, arg) {
+    const parts = arg.split(/\s+/).filter(Boolean);
+    if (!parts.length || parts[0].toLowerCase() === 'list') {
+        const r = await post('/bible', { action: 'list' });
+        return (r.bibles || []).length ? 'bibles: ' + r.bibles.join(', ') : 'no bibles yet 📖';
+    }
+    const sub = parts[0].toLowerCase();
+    if ((sub === 'save' || sub === 'new') && parts.length > 2) {
+        const r = await post('/bible', { action: sub, name: parts[1], text: parts.slice(2).join(' ') });
+        if (r.ok) return `bible [${parts[1].toLowerCase()}] ${sub === 'save' ? 'appended' : 'rewritten'} 📖`;
+        return 'bible failed';
+    }
+    if (sub === 'del' && parts.length > 1) {
+        const r = await post('/bible', { action: 'del', name: parts[1] });
+        return r.deleted || r.ok ? 'deleted ✅' : 'no such bible';
+    }
+    const r = await post('/bible', { action: 'get', name: parts[0] });
+    if (r.error) return 'no such bible — `.bible list` to see all';
+    return (`📖 ${parts[0].toLowerCase()}:\n` + (r.body || '')).slice(0, 3200);
 }
 
 module.exports = { handleOwnerCommand, parseOwnerCommand, parseWhen };

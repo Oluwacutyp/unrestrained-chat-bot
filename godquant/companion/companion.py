@@ -170,7 +170,8 @@ class CompanionAgent(BaseAgent):
     def chat(self, message: str, cid: str = "default",
              persona: str | None = None, use_search: bool = False,
              image_data: str | None = None, sender_name: str | None = None,
-             is_group: bool = False, bond_id: str | None = None) -> dict:
+             is_group: bool = False, bond_id: str | None = None,
+             bible: str | None = None) -> dict:
         persona = persona or self.cfg.persona
         get_persona(persona)  # validates, raises on unknown
 
@@ -244,6 +245,14 @@ class CompanionAgent(BaseAgent):
             system += "\n" + vibe_block
         if dossier_block:
             system += "\n" + dossier_block
+        if bible:
+            try:
+                _b = self.bonds.bible_get(bible)
+                if _b:
+                    system += (f"\n[WORLD BIBLE — {bible}: canon. Stay "
+                               f"consistent with it.]\n{_b[:3000]}")
+            except Exception:
+                pass
         mem_block = self.recall(cid, message)
         if mem_block:
             system += mem_block

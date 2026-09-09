@@ -182,6 +182,14 @@ def build_brief(bonds, pending_outbox: int = 0,
     close = [b for b in bonds.all_bonds() if b["level"] >= 2]
     lines.append(f"❤️ {len(close)} close bond(s)")
     try:
+        today = [e for e in bonds.cal_list(now - 86400)
+                 if e["ts"] - now < 86400 and not e["done"]]
+        if today:
+            lines.append("📅 today: " + "; ".join(
+                e["title"][:60] for e in today[:5]))
+    except Exception:
+        pass
+    try:
         rep = json.loads(bonds.kv_get("dream_report", "") or "{}")
     except ValueError:
         rep = {}

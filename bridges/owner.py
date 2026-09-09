@@ -17,12 +17,12 @@ HELP = {
                  "`.send <chat> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                  "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                  "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.train …` `.good` `.bad` `.help`"),
+                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.train …` `.good` `.bad` `.cal …` `.spend …` `.ledger` `.health …` `.bible …` `.help`"),
     "discord": ("discord cmds: `.mission <goal>` `.code <task>` `.exec <shell>` `.tick` "
                 "`.send <id> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                 "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                 "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.train …` `.good` `.bad` `.help`"),
+                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.train …` `.good` `.bad` `.cal …` `.spend …` `.ledger` `.health …` `.bible …` `.help`"),
 }
 
 
@@ -304,6 +304,86 @@ async def run_owner_command(api, channel: str, cmd: str, arg: str,
             r = await api("/train/script?out=" + quote(out))
             return (r.get("script") or "")[:3500]
         return "usage: .train status|export|push <user/repo>|script [out]"
+    if cmd == "cal":
+        parts = arg.split(None, 1)
+        sub = parts[0].lower() if parts else "list"
+        if sub == "add" and len(parts) > 1:
+            m = _WHEN_RE.match(parts[1].strip())
+            parsed = parse_when(m.group(1)) if m else None
+            if not m or not parsed:
+                return ("usage: .cal add <in 2h · tomorrow 7:00 · "
+                        "every day 8:00 · 19:30> <title>")
+            due, repeat = parsed
+            r = await api("/cal", {"action": "add",
+                                   "title": m.group(2).strip(), "ts": due,
+                                   "repeat": repeat, "channel": channel,
+                                   "chat_id": chat})
+            return (f"📅 #{r.get('id')} " +
+                    datetime.fromtimestamp(due).strftime("%m-%d %H:%M") +
+                    (f" ↻{repeat}" if repeat else ""))
+        if sub == "list" or not parts:
+            r = await api("/cal", {"action": "list"})
+            es = r.get("events", [])
+            if not es:
+                return "no upcoming events 📅"
+            return "\n".join(
+                f"#{e['id']} " +
+                datetime.fromtimestamp(e["ts"]).strftime("%m-%d %H:%M") +
+                (" ↻" if e["repeat"] else "") +
+                (" ✅" if e["done"] else "") + f" — {e['title'][:80]}"
+                for e in es)[:3000]
+        if sub in ("done", "del") and len(parts) > 1 \
+                and parts[1].strip().isdigit():
+            r = await api("/cal", {"action": sub, "id": int(parts[1].strip())})
+            return "done ✅" if r.get("ok") else "no such event"
+        return "usage: .cal add <when> <title> | .cal | .cal done|del <id>"
+    if cmd == "spend":
+        toks = arg.split()
+        if not toks:
+            return "usage: .spend <amount> [CUR] <cat> [note...]"
+        try:
+            amt = float(toks[0].replace(",", ""))
+        except ValueError:
+            return "usage: .spend <amount> [CUR] <cat> [note...]"
+        rest = toks[1:]
+        cur = ""
+        if rest and re.match(r"^[A-Za-z]{3}$", rest[0]):
+            cur = rest.pop(0).upper()
+        if not rest:
+            return "usage: .spend <amount> [CUR] <cat> [note...]"
+        cat, note = rest[0].lower(), " ".join(rest[1:])
+        r = await api("/ledger", {"action": "add", "amount": amt,
+                                  "currency": cur, "cat": cat, "note": note})
+        return (f"💸 #{r.get('id')} {amt:g} {cur} [{cat}]" +
+                (f" {note[:60]}" if note else ""))
+    if cmd == "ledger":
+        cat = arg.strip().lower()
+        r = await api("/ledger", {"action": "list", "cat": cat})
+        es = r.get("entries", [])
+        t = await api("/ledger", {"action": "total", "cat": cat})
+        if not es:
+            return "ledger empty 💸"
+        lines = [f"#{e['id']} {e['amount']:g} {e['currency']} [{e['cat']}] "
+                 f"{(e['note'] or '')[:50]}".rstrip() for e in es[:15]]
+        lines.append(f"Σ {t.get('total', 0):g}" +
+                     (f" [{cat}]" if cat else ""))
+        return "\n".join(lines)[:3000]
+    if cmd == "health":
+        met, _, val = arg.partition(" ")
+        if not met or not val.strip():
+            return "usage: .health <metric> <value>"
+        await api("/health", {"action": "log", "metric": met,
+                              "value": val.strip()})
+        return f"❤️ logged {met.lower()} = {val.strip()[:60]}"
+    if cmd == "healthlog":
+        r = await api("/health", {"action": "list", "metric": arg.strip()})
+        es = r.get("entries", [])
+        if not es:
+            return "no health logs ❤️"
+        return "\n".join(f"{e['metric']}: {e['value'][:60]}"
+                          for e in es[:15])[:2000]
+    if cmd == "bible":
+        return await _bible(api, arg)
     if cmd == "stats":
         r = await api("/status")
         mems = r.get("memories", {})
@@ -419,3 +499,25 @@ async def _note(api, arg: str) -> str:
     if r.get("error"):
         return "no such note — `.note list` to see all"
     return f"📝 {parts[0].lower()}:\n{(r.get('body') or '')[:3000]}"
+
+async def _bible(api, arg: str) -> str:
+    parts = (arg or "").split(None, 2)
+    if not parts or parts[0].lower() == "list":
+        r = await api("/bible", {"action": "list"})
+        bs = r.get("bibles", [])
+        return "bibles: " + ", ".join(bs) if bs else "no bibles yet 📖"
+    sub = parts[0].lower()
+    if sub in ("save", "new") and len(parts) > 2:
+        r = await api("/bible", {"action": sub, "name": parts[1],
+                                 "text": parts[2]})
+        if r.get("ok"):
+            return (f"bible [{parts[1].lower()}] "
+                    f"{'appended' if sub == 'save' else 'rewritten'} 📖")
+        return "bible failed"
+    if sub == "del" and len(parts) > 1:
+        r = await api("/bible", {"action": "del", "name": parts[1]})
+        return "deleted ✅" if r.get("ok") else "no such bible"
+    r = await api("/bible", {"action": "get", "name": parts[0]})
+    if r.get("error"):
+        return "no such bible — `.bible list` to see all"
+    return f"📖 {parts[0].lower()}:\n{(r.get('body') or '')[:3000]}"

@@ -339,6 +339,28 @@ class ProactiveEngine:
         except Exception as e:
             log.warning("brief failed: %s", e)
 
+    def _tick_events(self, now: float) -> list[dict]:
+        try:
+            due = self.companion.bonds.cal_due(now)
+        except Exception as e:
+            log.warning("events: %s", e)
+            return []
+        queued = []
+        for e in due:
+            try:
+                if not e["channel"] or not e["chat_id"]:
+                    self.companion.bonds.cal_fire(e["id"], now)
+                    continue
+                mid = self.outbox.enqueue(e["channel"], e["chat_id"],
+                                          f"📅 {e['title']}")
+                self.companion.bonds.cal_fire(e["id"], now)
+                queued.append({"id": mid, "channel": e["channel"],
+                               "to": e["chat_id"],
+                               "message": f"📅 {e['title'][:120]}"})
+            except Exception as ex:
+                log.warning("event #%d failed: %s", e["id"], ex)
+        return queued
+
     def _tick_missions(self) -> list[dict]:
         from godquant.agents.missions import MissionStore
         try:
@@ -417,6 +439,7 @@ class ProactiveEngine:
         self._tick_brief(now, queued)
         queued += self._tick_intentions(now)
         queued += self._tick_missions()
+        queued += self._tick_events(now)
         with self.outbox._lock:
             rows = self.outbox._conn.execute(
                 "SELECT channel,chat_id,display,enabled,quiet,max_nudges,"

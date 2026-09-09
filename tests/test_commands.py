@@ -300,7 +300,7 @@ def test_wa_owner_defines_everything_it_calls():
                 "require", "setTimeout", "parseInt", "console", "process",
                 "setInterval", "Promise", "JSON", "Math", "Date", "isNaN",
                 "Set", "Map", "async", "of", "new", "post", "String",
-                "encodeURIComponent"}  # post = injected transport
+                "parseFloat", "encodeURIComponent"}  # post = injected transport
     undefined = {c for c in calls - defined - builtins
                  if not c.startswith("_")}
     assert not undefined, f"undefined calls in wa_owner.js: {undefined}"

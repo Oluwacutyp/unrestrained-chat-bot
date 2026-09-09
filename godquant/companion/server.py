@@ -31,6 +31,7 @@ API is backward compatible with whatsapp.js:
   GET  /recall?q=&scope= | GET|POST /memories → unified memory ops
   GET|POST /missions → persistent projects (create/list/get/resume)
   GET /train/status|/train/script + POST /train/export|/train/push|/pref
+  POST /cal|/ledger|/health|/bible → life-OS + world bibles
 GET / serves the single-file chat UI (mobile-first, Termux-friendly).
 """
 from __future__ import annotations
@@ -293,7 +294,8 @@ class _Handler(BaseHTTPRequestHandler):
                         image_data=data.get("image"),
                         sender_name=data.get("sender_name"),
                         is_group=bool(data.get("is_group")),
-                        bond_id=data.get("bond_id"))
+                        bond_id=data.get("bond_id"),
+                        bible=data.get("bible"))
                 return self._json({**out, "conversation_id": cid})
             if path == "/send":
                 if not data.get("message") or not data.get("to"):
@@ -603,6 +605,84 @@ class _Handler(BaseHTTPRequestHandler):
                             {"error": "no exchange in " + cid}, 404)
                     companion.collector.log_pref(ex["user"], verdict, ex["reply"])
                 return self._json({"logged": verdict})
+            if path == "/cal":
+                b = companion.bonds
+                act = (data.get("action") or "list").lower()
+                if act == "add" and data.get("title") and data.get("ts"):
+                    with self.lock:
+                        eid = b.cal_add(
+                            data["title"], float(data["ts"]),
+                            data.get("repeat", ""), data.get("channel", ""),
+                            str(data.get("chat_id", "")))
+                    return self._json({"id": eid})
+                if act == "list":
+                    import time as _t
+                    with self.lock:
+                        return self._json(
+                            {"events": b.cal_list(_t.time() - 86400)})
+                if act == "done":
+                    with self.lock:
+                        return self._json(
+                            {"ok": b.cal_done(int(data.get("id", 0)))})
+                if act == "del":
+                    with self.lock:
+                        return self._json(
+                            {"ok": b.cal_del(int(data.get("id", 0)))})
+                return self._json({"error": "action: add|list|done|del"}, 400)
+            if path == "/ledger":
+                b = companion.bonds
+                act = (data.get("action") or "list").lower()
+                if act == "add" and data.get("amount") is not None:
+                    with self.lock:
+                        lid = b.spend(float(data["amount"]),
+                                      data.get("currency", ""),
+                                      data.get("cat", ""),
+                                      data.get("note", ""))
+                    return self._json({"id": lid})
+                if act == "list":
+                    with self.lock:
+                        return self._json({"entries": b.ledger_list(
+                            data.get("cat", ""))})
+                if act == "total":
+                    with self.lock:
+                        return self._json(
+                            {"total": b.ledger_total(data.get("cat", ""))})
+                return self._json({"error": "action: add|list|total"}, 400)
+            if path == "/health":
+                b = companion.bonds
+                act = (data.get("action") or "list").lower()
+                if act == "log" and data.get("metric") and data.get("value"):
+                    with self.lock:
+                        hid = b.health_log(data["metric"], data["value"])
+                    return self._json({"id": hid})
+                if act == "list":
+                    with self.lock:
+                        return self._json({"entries": b.health_list(
+                            data.get("metric", ""))})
+                return self._json({"error": "action: log|list"}, 400)
+            if path == "/bible":
+                b = companion.bonds
+                act = (data.get("action") or "get").lower()
+                name = (data.get("name") or "").strip()
+                if act in ("save", "new") and name and data.get("text"):
+                    with self.lock:
+                        b.bible_save(name, data["text"],
+                                     mode="append" if act == "save"
+                                     else "replace")
+                    return self._json({"ok": True, "bible": name.lower()})
+                if act == "get" and name:
+                    with self.lock:
+                        body = b.bible_get(name)
+                    return self._json({"body": body} if body is not None
+                                      else {"error": "no such bible"})
+                if act == "list":
+                    with self.lock:
+                        return self._json({"bibles": b.bible_list()})
+                if act == "del" and name:
+                    with self.lock:
+                        return self._json({"ok": b.bible_del(name)})
+                return self._json({"error": "action: save|new|get|list|del"},
+                                  400)
             if path == "/warn":
                 msg = (data.get("message") or "").strip()[:500]
                 if not msg:

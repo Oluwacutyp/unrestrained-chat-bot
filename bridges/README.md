@@ -143,6 +143,7 @@ server. WhatsApp: `WA_OWNER_NUMBER` + `.cmd` in any chat incl. self-chat.
 | `.recall <query>` · `.mem list [scope]` · `.mem pin/unpin/del/edit` | unified memory: search everything, inspect + curate any memory (v4.0) |
 | `.project <goal>` · `.projects` · `.resume <id>` | persistent background projects with progress reports (v4.1) |
 | `.train status\|export\|push\|script` · `.good` · `.bad` | personal-model data collection + HF pipe (v4.2) |
+| `.cal …` · `.spend …` · `.ledger` · `.health …` · `.healthlog` · `.bible …` | calendar + ledger + health + world bibles (v4.3) |
 
 Contacts get: `!reset` `!mood` `!search` `!news` `!wiki` `!fact` `!translate`.
 

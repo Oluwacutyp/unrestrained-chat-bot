@@ -74,6 +74,16 @@ async function main() {
         if (path === '/missions' && payload.action === 'create') return { started: true };
         if (path === '/missions' && payload.action === 'resume') return payload.id === 1 ? { started: true } : { error: 'x' };
         if (path === '/missions') return { missions: [{ id: 1, status: 'done', goal: 'research lizards' }] };
+        if (path === '/cal' && payload.action === 'add') return { id: 3 };
+        if (path === '/cal') return (payload.action === 'done' || payload.action === 'del') ? { ok: true } : { events: [{ id: 3, title: 'dentist', ts: 2000000000, repeat: '', done: false }] };
+        if (path === '/ledger' && payload.action === 'add') return { id: 4 };
+        if (path === '/ledger' && payload.action === 'total') return { total: 2500 };
+        if (path === '/ledger') return { entries: [{ id: 4, amount: 2500, currency: 'NGN', cat: 'food', note: 'lunch' }] };
+        if (path === '/health' && payload.action === 'log') return { id: 5 };
+        if (path === '/health') return { entries: [{ metric: 'sleep', value: '7h' }] };
+        if (path === '/bible' && (payload.action === 'save' || payload.action === 'new')) return { ok: true };
+        if (path === '/bible' && payload.action === 'get') return payload.name === 'midgard' ? { body: 'CANON' } : { error: 'x' };
+        if (path === '/bible') return { bibles: ['midgard'] };
         if (path === '/pref') return payload.cid === 'whatsapp:nobody' ? { error: 'x' } : { logged: payload.verdict };
         if (path === '/train/status') return { trajectories: 10, prefs: 2, pairs: 1, bytes: 99 };
         if (path === '/train/export') return { sft: 9, dpo: 1, skipped: 1, dir: '/w/train' };
@@ -155,6 +165,16 @@ async function main() {
     has(await run('.train export'), 'sft=9', 'train export');
     has(await run('.train push u/d'), 'u/d', 'train push');
     has(await run('.train script'), 'SFTTrainer', 'train script');
+    has(await run('.cal add in 2h dentist'), '#3', 'cal add');
+    has(await run('.cal'), 'dentist', 'cal list');
+    has(await run('.cal done 3'), 'done', 'cal done');
+    has(await run('.spend 2500 NGN food lunch'), '#4', 'spend');
+    has(await run('.ledger'), '2500', 'ledger');
+    has(await run('.health sleep 7h'), 'logged', 'health');
+    has(await run('.healthlog'), 'sleep', 'healthlog');
+    has(await run('.bible save midgard CANON'), 'appended', 'bible save');
+    has(await run('.bible midgard'), 'CANON', 'bible get');
+    has(await run('.bible list'), 'midgard', 'bible list');
     console.log(`wa_owner.js OK (${n} asserts)`);
 }
 

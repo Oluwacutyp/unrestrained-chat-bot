@@ -41,8 +41,10 @@ fits the same API; SqliteVectorIndex/Chroma later).
   (`hf_pipe`: dataset push to the user's account, one-file TRL SFT+LoRA
   →DPO script, Gradio Space scaffold). AutoTrain rejected (dead upstream);
   training runs off-phone, the *data asset* is collected on-phone.
-- **v4.3 life-OS + creative:** calendar, finance/health logs, project
-  tracking, world bibles for long-running creative consistency.
+- **v4.3 life-OS + creative ✅ shipped:** calendar/events (due-date
+  fire via tick, daily repeats), spending ledger (per-cat totals),
+  health log, world bibles (append/replace, injected as canon into the
+  `/chat` system prompt via `bible=`), today's events in the brief.
 
 ## Reliability bar (every phase)
 

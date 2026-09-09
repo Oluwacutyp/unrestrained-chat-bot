@@ -102,6 +102,39 @@ FRICTION_HALFLIFE_H = 1.0  # friction halves every hour of quiet
 SCORE_DECAY_DAY = 0.90    # score ×0.9 per silent day
 
 
+_LIFE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS life_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  ts REAL NOT NULL,
+  repeat TEXT DEFAULT '',
+  channel TEXT DEFAULT '',
+  chat_id TEXT DEFAULT '',
+  done INTEGER DEFAULT 0,
+  created REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  amount REAL NOT NULL,
+  currency TEXT DEFAULT '',
+  cat TEXT DEFAULT '',
+  note TEXT DEFAULT '',
+  ts REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS health (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  metric TEXT NOT NULL,
+  value TEXT NOT NULL,
+  ts REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS bibles (
+  name TEXT PRIMARY KEY,
+  body TEXT NOT NULL,
+  updated REAL NOT NULL
+);
+"""
+
+
 _MIND_SCHEMA = """
 CREATE TABLE IF NOT EXISTS reminders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -278,7 +311,7 @@ class BondStore:
                                      timeout=30)
         self._lock = threading.Lock()
         with self._lock:
-            self._conn.executescript(_SCHEMA + _FACTS_SCHEMA + _PERSONA_SCHEMA + _MIND_SCHEMA)
+            self._conn.executescript(_SCHEMA + _FACTS_SCHEMA + _PERSONA_SCHEMA + _MIND_SCHEMA + _LIFE_SCHEMA)
             _fh = {r[1] for r in self._conn.execute(
                 "PRAGMA table_info(bond_facts)").fetchall()}
             for _col, _ddl in (("importance", "REAL DEFAULT 0.5"),
@@ -723,3 +756,151 @@ class BondStore:
                      "importance": r[3] if r[3] is not None else 0.5,
                      "confidence": r[4] if r[4] is not None else 0.8,
                      "pinned": bool(r[5])} for r in cur.fetchall()]
+
+    # ---- life OS: calendar / ledger / health / bibles ----
+    def cal_add(self, title: str, ts: float, repeat: str = "",
+                channel: str = "", chat_id: str = "") -> int:
+        import time as _t
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO life_events(title,ts,repeat,channel,chat_id,"
+                "created) VALUES(?,?,?,?,?,?)",
+                (title.strip(), ts, repeat, channel, str(chat_id), _t.time()))
+            self._conn.commit()
+            return int(cur.lastrowid)
+
+    def cal_due(self, now: float) -> list[dict]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT id,title,ts,repeat,channel,chat_id FROM life_events "
+                "WHERE done=0 AND ts<=? ORDER BY ts", (now,))
+            return [{"id": r[0], "title": r[1], "ts": r[2], "repeat": r[3],
+                     "channel": r[4], "chat_id": r[5]} for r in cur.fetchall()]
+
+    def cal_list(self, from_ts: float = 0.0, limit: int = 20) -> list[dict]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT id,title,ts,repeat,done FROM life_events "
+                "WHERE ts>=? ORDER BY ts LIMIT ?", (from_ts, limit))
+            return [{"id": r[0], "title": r[1], "ts": r[2], "repeat": r[3],
+                     "done": bool(r[4])} for r in cur.fetchall()]
+
+    def cal_fire(self, eid: int, now: float):
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT ts,repeat FROM life_events WHERE id=?", (eid,))
+            r = cur.fetchone()
+            if not r:
+                return
+            if r[1] == "daily":
+                due = r[0]
+                while due <= now:
+                    due += 86400
+                self._conn.execute(
+                    "UPDATE life_events SET ts=? WHERE id=?", (due, eid))
+            else:
+                self._conn.execute(
+                    "UPDATE life_events SET done=1 WHERE id=?", (eid,))
+            self._conn.commit()
+
+    def cal_done(self, eid: int) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE life_events SET done=1 WHERE id=?", (eid,))
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def cal_del(self, eid: int) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM life_events WHERE id=?",
+                                     (eid,))
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def spend(self, amount: float, currency: str = "", cat: str = "",
+              note: str = "") -> int:
+        import time as _t
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO ledger(amount,currency,cat,note,ts) VALUES(?,?,?,?,?)",
+                (amount, currency, cat, note, _t.time()))
+            self._conn.commit()
+            return int(cur.lastrowid)
+
+    def ledger_list(self, cat: str = "", limit: int = 20) -> list[dict]:
+        with self._lock:
+            if cat:
+                cur = self._conn.execute(
+                    "SELECT id,amount,currency,cat,note,ts FROM ledger "
+                    "WHERE cat=? ORDER BY id DESC LIMIT ?", (cat, limit))
+            else:
+                cur = self._conn.execute(
+                    "SELECT id,amount,currency,cat,note,ts FROM ledger "
+                    "ORDER BY id DESC LIMIT ?", (limit,))
+            return [{"id": r[0], "amount": r[1], "currency": r[2], "cat": r[3],
+                     "note": r[4], "ts": r[5]} for r in cur.fetchall()]
+
+    def ledger_total(self, cat: str = "") -> float:
+        with self._lock:
+            if cat:
+                cur = self._conn.execute(
+                    "SELECT COALESCE(SUM(amount),0) FROM ledger WHERE cat=?",
+                    (cat,))
+            else:
+                cur = self._conn.execute("SELECT COALESCE(SUM(amount),0) FROM ledger")
+            return float(cur.fetchone()[0])
+
+    def health_log(self, metric: str, value: str) -> int:
+        import time as _t
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO health(metric,value,ts) VALUES(?,?,?)",
+                (metric.strip().lower(), value.strip(), _t.time()))
+            self._conn.commit()
+            return int(cur.lastrowid)
+
+    def health_list(self, metric: str = "", limit: int = 20) -> list[dict]:
+        with self._lock:
+            if metric:
+                cur = self._conn.execute(
+                    "SELECT metric,value,ts FROM health WHERE metric=? "
+                    "ORDER BY id DESC LIMIT ?", (metric.strip().lower(), limit))
+            else:
+                cur = self._conn.execute(
+                    "SELECT metric,value,ts FROM health "
+                    "ORDER BY id DESC LIMIT ?", (limit,))
+            return [{"metric": r[0], "value": r[1], "ts": r[2]}
+                    for r in cur.fetchall()]
+
+    def bible_save(self, name: str, text: str, mode: str = "append"):
+        import time as _t
+        name = name.strip().lower()
+        with self._lock:
+            if mode == "append":
+                cur = self._conn.execute("SELECT body FROM bibles WHERE name=?",
+                                         (name,))
+                r = cur.fetchone()
+                text = ((r[0] + "\n" + text.strip()) if r else text.strip())
+            self._conn.execute(
+                "INSERT OR REPLACE INTO bibles(name,body,updated) VALUES(?,?,?)",
+                (name, text.strip()[:20000], _t.time()))
+            self._conn.commit()
+
+    def bible_get(self, name: str) -> str | None:
+        with self._lock:
+            cur = self._conn.execute("SELECT body FROM bibles WHERE name=?",
+                                     (name.strip().lower(),))
+            r = cur.fetchone()
+            return r[0] if r else None
+
+    def bible_list(self) -> list[str]:
+        with self._lock:
+            cur = self._conn.execute("SELECT name FROM bibles ORDER BY name")
+            return [r[0] for r in cur.fetchall()]
+
+    def bible_del(self, name: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM bibles WHERE name=?",
+                                     (name.strip().lower(),))
+            self._conn.commit()
+            return cur.rowcount > 0

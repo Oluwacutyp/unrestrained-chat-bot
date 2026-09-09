@@ -112,7 +112,7 @@ async function waPost(path, payload, timeoutMs) {
 }
 
 // ---------- brain ----------
-async function getAIResponse(message, chatId, senderName, isGroup, bondId) {
+async function getAIResponse(message, chatId, senderName, isGroup, bondId, imageData) {
     try {
         const prefix = process.env.WA_MISSION_PREFIX || '!';
         if (message.startsWith(prefix)) {
@@ -132,7 +132,8 @@ async function getAIResponse(message, chatId, senderName, isGroup, bondId) {
             is_group: !!isGroup,
             bond_id: bondId || chatId,
             use_search: process.env.WA_SEARCH === '1',
-            persona: process.env.WA_PERSONA || undefined
+            persona: process.env.WA_PERSONA || undefined,
+            image: imageData || undefined
         }, { timeout: 120000 });
         if (response.data && response.data.response) {
             return response.data.response;  // clean — mood stays server-side
@@ -183,9 +184,23 @@ async function handleMessage(sock, m) {
     if (!jid) return;
     const msg = m.message;
     const ctx = (msg.extendedTextMessage && msg.extendedTextMessage.contextInfo) || {};
-    const text = (msg.conversation || (msg.extendedTextMessage && msg.extendedTextMessage.text) ||
+    let text = (msg.conversation || (msg.extendedTextMessage && msg.extendedTextMessage.text) ||
                   (msg.imageMessage && msg.imageMessage.caption) || '').trim();
-    if (!text) return;
+    const hasImage = !!(msg.imageMessage && (msg.imageMessage.url || msg.imageMessage.directPath));
+    if (!text && !hasImage) return;
+    let imageData = '';
+    if (hasImage) {
+        try {
+            const buf = await baileys.downloadMediaMessage(m, 'buffer', {}, {
+                logger: pino({ level: 'silent' }),
+                reuploadRequest: sock.updateMediaMessage
+            });
+            if (buf && buf.length <= 4 * 1024 * 1024) {
+                imageData = 'data:image/jpeg;base64,' + buf.toString('base64');
+            }
+        } catch (e) { console.log('wa image download failed:', e.message); }
+    }
+    if (!text && imageData) text = '[photo]';
     const isGroup = jid.endsWith('@g.us');
     const sender = m.key.participant || jid;
     const number = normJid(sender);
@@ -221,7 +236,7 @@ async function handleMessage(sock, m) {
     if (isGroup) registerContact(jid, jid);
     const bondId = 'whatsapp:' + number;
     console.log('🤖 Generating AI response...');
-    const aiResponse = await getAIResponse(text, jid, name, isGroup, bondId);
+    const aiResponse = await getAIResponse(text, jid, name, isGroup, bondId, imageData);
     console.log(`💬 AI Response: "${aiResponse}"\n`);
     try {
         await humanSend(sock, jid, aiResponse, m);

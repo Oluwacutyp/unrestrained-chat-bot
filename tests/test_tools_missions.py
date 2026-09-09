@@ -118,7 +118,7 @@ def test_ask_with_tools():
         def __init__(self):
             self.n = 0
 
-        def complete(self, sys, user, agent="x"):
+        def complete(self, sys, user, agent="x", images=None):
             self.n += 1
             if self.n == 1:
                 return Resp('{"tool": "py_run", "args": '

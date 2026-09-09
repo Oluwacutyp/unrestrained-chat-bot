@@ -45,6 +45,7 @@ async function main() {
         if (path === '/exec') return { exit: 0, output: 'hi\n' };
         if (path === '/models') return { primary: 'groq', chain: ['groq', 'heuristic'], usage: { llm_calls: 3, spend_usd: 0 } };
         if (path === '/model') return payload.primary === 'nope' ? { error: 'unknown' } : { primary: payload.primary || 'llamacpp', model: payload.model, gguf: payload.gguf };
+        if (path === '/persona' && payload && payload.pack_action) return payload.pack_action === 'list' ? { packs: ['zed'] } : payload.pack_action === 'create' ? { created: payload.name } : { name: payload.name, pack: { blurb: 'b', voice: 'soft' }, learned: 'loved short' };
         if (path === '/persona' && payload && payload.persona) return { default: payload.persona };
         if (path === '/persona') return { default: 'devon', overrides: [] };
         if (path.startsWith('/persona?')) return { persona: 'alex', override: true };
@@ -181,6 +182,9 @@ async function main() {
     has(await run('.bible list'), 'midgard', 'bible list');
     has(await run('.research lagos weather'), 'BRIEF', 'research');
     has(await run('.research'), 'usage', 'research usage');
+    has(await run('.persona create zed'), 'created', 'persona create');
+    has(await run('.persona show zed'), 'soft', 'persona show');
+    has(await run('.persona list'), 'zed', 'persona list');
     console.log(`wa_owner.js OK (${n} asserts)`);
 }
 

@@ -57,13 +57,14 @@ class LLMRouter:
         pin, pout = PRICES_PER_1K.get(resp.model, (0.0, 0.0))
         return (resp.prompt_tokens / 1000) * pin + (resp.completion_tokens / 1000) * pout
 
-    def complete(self, system: str, user: str, agent: str = "core") -> LLMResponse:
+    def complete(self, system: str, user: str, agent: str = "core",
+                       images: list | None = None) -> LLMResponse:
         last_err: Exception | None = None
         for kind in self.chain():
             try:
                 provider = self._build(kind)
                 t0 = time.time()
-                resp = provider.complete(system, user)
+                resp = provider.complete(system, user, images=images)
                 resp.cost_usd = self._estimate_cost(resp)
                 if self.memory is not None:
                     try:

@@ -63,7 +63,8 @@ class BaseProvider:
         self.max_tokens = max_tokens
         self.timeout = timeout
 
-    def complete(self, system: str, user: str) -> LLMResponse:
+    def complete(self, system: str, user: str,
+                       images: list | None = None) -> LLMResponse:
         raise NotImplementedError
 
 
@@ -93,16 +94,27 @@ class OpenAICompatibleProvider(BaseProvider):
             self.model = self.PROVIDER_DEFAULTS.get(provider, ("", self.default_model))[1]
         self.name = provider
 
-    def complete(self, system: str, user: str) -> LLMResponse:
+    def complete(self, system: str, user: str,
+                       images: list | None = None) -> LLMResponse:
         url = f"{self.base_url}/chat/completions"
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        model = self.model
+        user_content: object = user
+        if images:
+            import os as _os
+            from godquant.llm.vision import user_parts, vision_model_for
+            model = vision_model_for(
+                getattr(self, "provider_kind", self.name), self.model,
+                _os.environ.get("GQ_VISION_MODEL", ""))
+            user_content = user_parts(user, [str(i) for i in images])
+            self.model = model
         payload = {
-            "model": self.model,
+            "model": model,
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": "user", "content": user_content},
             ],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
@@ -180,27 +192,42 @@ class PollinationsProvider(OpenAICompatibleProvider):
             pass
         return "openai"
 
-    def complete(self, system: str, user: str) -> LLMResponse:
+    def complete(self, system: str, user: str,
+                       images: list | None = None) -> LLMResponse:
         if not self._explicit_model:
             try:
                 self.model = self.resolve_free_model()
             except Exception:
                 pass
-        return super().complete(system, user)
+        return super().complete(system, user, images=images)
 
 
 class AnthropicProvider(BaseProvider):
     name = "anthropic"
     default_model = "claude-3-5-haiku-latest"
 
-    def complete(self, system: str, user: str) -> LLMResponse:
+    def complete(self, system: str, user: str,
+                       images: list | None = None) -> LLMResponse:
         url = "https://api.anthropic.com/v1/messages"
         headers = {"Content-Type": "application/json",
                    "x-api-key": self.api_key,
                    "anthropic-version": "2023-06-01"}
+        ucontent: object = user
+        if images:
+            from godquant.llm.vision import clean_image as _ci
+            _blocks: list = [{"type": "text", "text": user}]
+            for _img in images:
+                _u = _ci(str(_img))
+                if _u.startswith("http"):
+                    raise ValueError("anthropic needs data-URL images")
+                _head, _, _b64 = _u.partition(";base64,")
+                _mime = _head.split(":")[1] if ":" in _head else "image/jpeg"
+                _blocks.append({"type": "image", "source": {
+                    "type": "base64", "media_type": _mime, "data": _b64}})
+            ucontent = _blocks
         payload = {"model": self.model, "max_tokens": self.max_tokens,
                    "system": system,
-                   "messages": [{"role": "user", "content": user}]}
+                   "messages": [{"role": "user", "content": ucontent}]}
         out = _http_post(url, payload, headers, self.timeout)
         blocks = out.get("content", [])
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
@@ -214,7 +241,10 @@ class GeminiProvider(BaseProvider):
     name = "gemini"
     default_model = "gemini-2.0-flash"
 
-    def complete(self, system: str, user: str) -> LLMResponse:
+    def complete(self, system: str, user: str,
+                       images: list | None = None) -> LLMResponse:
+        if images:
+            raise ValueError("gemini vision not wired yet — failing over")
         url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
                f"{self.model}:generateContent?key={self.api_key}")
         payload = {"system_instruction": {"parts": [{"text": system}]},
@@ -231,7 +261,10 @@ class OllamaNativeProvider(BaseProvider):
     name = "ollama"
     default_model = "llama3.1"
 
-    def complete(self, system: str, user: str) -> LLMResponse:
+    def complete(self, system: str, user: str,
+                       images: list | None = None) -> LLMResponse:
+        if images:
+            raise ValueError("ollama-native has no vision — failing over")
         host = self.base_url or "http://localhost:11434"
         host = host[:-3] if host.endswith("/v1") else host
         url = f"{host}/api/generate"
@@ -256,7 +289,8 @@ class HeuristicProvider(BaseProvider):
     name = "heuristic"
     default_model = "heuristic-v1"
 
-    def complete(self, system: str, user: str) -> LLMResponse:
+    def complete(self, system: str, user: str,
+                       images: list | None = None) -> LLMResponse:
         import re as _re
         low = (system + "\n" + user).lower()
 

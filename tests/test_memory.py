@@ -37,7 +37,7 @@ class FakeRouter:
         self.systems = []
         self.calls = 0
 
-    def complete(self, system, user, agent=None):
+    def complete(self, system, user, agent=None, images=None):
         self.calls += 1
         self.systems.append(system)
         text = self.script.pop(0) if self.script else "ok"

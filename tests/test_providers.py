@@ -102,7 +102,7 @@ class _Fake:
         self.name = name
         self.fail = fail
 
-    def complete(self, system, user):
+    def complete(self, system, user, images=None):
         if self.fail:
             raise RuntimeError("boom")
         return LLMResponse(text="ok", model="fake", provider=self.name)

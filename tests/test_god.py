@@ -33,7 +33,7 @@ class FakeRouter:
         self.script = list(script)
         self.calls = 0
 
-    def complete(self, system, user, agent=None):
+    def complete(self, system, user, agent=None, images=None):
         self.calls += 1
         text = self.script.pop(0) if self.script else "ok"
         return types.SimpleNamespace(text=text)
@@ -259,7 +259,7 @@ def test_discord_owner_cmds(monkeypatch):
 def test_discord_dm_flow(monkeypatch):
     mod = _load_discord()
 
-    async def fake_chat(text, aid, display, cid, is_group=False):
+    async def fake_chat(text, aid, display, cid, is_group=False, image=""):
         return {"response": "yo 😊", "mood": "happy", "substance": 0.5}
     monkeypatch.setattr(mod, "chat_full", fake_chat)
     ch = _FakeChannel()

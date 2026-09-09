@@ -119,7 +119,7 @@ def allowed(sender_id: int, username: str | None) -> bool:
 
 async def chat_full(text: str, sender_id: int, display: str,
                    use_search: bool = False, chat_id=None,
-                   is_group: bool = False) -> dict:
+                   is_group: bool = False, image: str = "") -> dict:
     """Ask the brain. Group chats share one context; bonds stay per-sender.
 
     Returns the full /chat payload (response + mood + bond intelligence)
@@ -131,7 +131,8 @@ async def chat_full(text: str, sender_id: int, display: str,
         "channel": "telegram", "chat_id": chat, "display": display,
         "sender_name": display, "is_group": is_group,
         "bond_id": f"telegram:{sender_id}",
-        "persona": PERSONA or None, "use_search": use_search}, timeout=180)
+        "persona": PERSONA or None, "use_search": use_search,
+        "image": image or None}, timeout=180)
 
 
 async def chat_reply(text: str, sender_id: int, display: str,
@@ -301,8 +302,19 @@ async def handle_incoming(event, client, me) -> str | None:
         print(f"⏭ ignored {sid}")
         return None
     text = (event.raw_text or "").strip()
-    if not text:
+    image_b64 = ""
+    if getattr(event, "photo", None):
+        try:
+            raw = await client.download_media(event.message, bytes)
+            if raw and len(raw) <= 4 * 1024 * 1024:
+                import base64 as _b64
+                image_b64 = ("data:image/jpeg;base64," +
+                             _b64.b64encode(raw).decode())
+        except Exception as e:
+            print(f"photo download failed: {e}")
+    if not text and not image_b64:
         return None
+    text = text or "[photo]"
     name = getattr(sender, "first_name", None) or getattr(sender, "username", str(sid))
     print(f"📨 {name} ({sid}): {text[:80]}")
     try:
@@ -316,7 +328,8 @@ async def handle_incoming(event, client, me) -> str | None:
                 await event.reply(out[:4000])
                 return out
         full = await chat_full(text, sid, name, use_search=SEARCH,
-                               chat_id=event.chat_id, is_group=is_group)
+                               chat_id=event.chat_id, is_group=is_group,
+                               image=image_b64)
         reply = full.get("response") or "(no reply 😅)"
         chat_key = "tg:%s" % event.chat_id
         energy = "rapid" if (exchanges.gap(chat_key) or 1e9) < 90 else "calm"

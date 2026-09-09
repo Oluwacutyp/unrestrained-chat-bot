@@ -115,7 +115,8 @@ def should_reply(message, bot_id: int) -> bool:
     """DMs always; guilds only on mention; never bots/empties."""
     if getattr(message.author, "bot", False):
         return False
-    if not (message.content or "").strip():
+    if not (message.content or "").strip() and \
+            not getattr(message, "attachments", None):
         return False
     if message.guild is None:
         return True
@@ -128,13 +129,13 @@ def guild_allowed(guild_id) -> bool:
 
 
 async def chat_full(text: str, author_id, display: str, channel_id,
-                    is_group: bool = False) -> dict:
+                    is_group: bool = False, image: str = "") -> dict:
     return await api("/chat", {
         "message": text, "conversation_id": f"discord:{channel_id}",
         "channel": "discord", "chat_id": str(channel_id), "display": display,
         "sender_name": display, "is_group": is_group,
         "bond_id": f"discord:{author_id}",
-        "persona": PERSONA or None}, timeout=180)
+        "persona": PERSONA or None, "image": image or None}, timeout=180)
 
 
 async def human_send(channel, text: str, mood: str = "neutral",
@@ -176,6 +177,19 @@ async def handle_message(message, client) -> str | None:
     """Route one Discord message. Returns reply text or None."""
     bot_id = getattr(getattr(client, "user", None), "id", 0)
     text = (message.content or "").strip()
+    image_b64 = ""
+    for att in (getattr(message, "attachments", None) or [])[:1]:
+        try:
+            raw = await att.read()
+            if raw and len(raw) <= 4 * 1024 * 1024:
+                import base64 as _b64
+                mt = (getattr(att, "content_type", None) or
+                      "image/jpeg").split(";")[0]
+                image_b64 = (f"data:{mt};base64," +
+                             _b64.b64encode(raw).decode())
+        except Exception as e:
+            print(f"attachment failed: {e}")
+    text = text or ("[photo]" if image_b64 else "")
     if getattr(message.author, "bot", False):
         return None
     # owner commands (anywhere, PREFIX-prefixed)
@@ -202,7 +216,8 @@ async def handle_message(message, client) -> str | None:
         getattr(message.author, "name", str(message.author.id))
     try:
         full = await chat_full(text, message.author.id, display,
-                               message.channel.id, is_group)
+                               message.channel.id, is_group,
+                               image=image_b64)
         reply = full.get("response") or "(no reply 😅)"
         await human_send(message.channel, reply,
                          mood=full.get("mood", "neutral"),

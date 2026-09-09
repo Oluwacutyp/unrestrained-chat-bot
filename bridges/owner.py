@@ -435,6 +435,29 @@ async def run_owner_command(api, channel: str, cmd: str, arg: str,
 
 async def _persona(api, channel: str, arg: str) -> str:
     parts = arg.split()
+    if parts and parts[0].lower() in ("create", "show", "list"):
+        sub = parts[0].lower()
+        if sub == "list":
+            r = await api("/persona", {"pack_action": "list"})
+            ps = r.get("packs", [])
+            return "packs: " + (", ".join(ps) if ps
+                                else "none yet — `.persona create <name>`")
+        if len(parts) < 2:
+            return "usage: .persona create|show <name>"
+        r = await api("/persona", {"pack_action": sub, "name": parts[1],
+                                   "blurb": " ".join(parts[2:])})
+        if r.get("error"):
+            return f"persona failed: {r['error']}"
+        if sub == "create":
+            return (f"pack [{r.get('created')}] created 📦 — edit "
+                    f"personas/{r.get('created')}.md, it merges live")
+        d = r.get("pack", {}) or {}
+        out = f"📦 {r.get('name')}: {d.get('blurb', '')}\n" + "\n".join(
+            f"[{k}]\n{(d.get(k) or '')[:500]}"
+            for k in ("identity", "voice", "taboos") if d.get(k))
+        if r.get("learned"):
+            out += f"\n[learned]\n{r['learned'][:800]}"
+        return out[:3500] or "empty pack"
     if not parts:  # show global default + overrides
         r = await api("/persona")
         ov = r.get("overrides", {})

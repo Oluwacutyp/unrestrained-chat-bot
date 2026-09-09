@@ -18,6 +18,7 @@ from godquant.agents.base import AgentResult, AgentTask, BaseAgent
 from godquant.companion import web_search as WS
 from godquant.companion.mood import MoodEngine
 from godquant.companion.personas import get_persona, render_persona
+from godquant.memory.vault import HistoryVault
 from godquant.companion.memory_engine import (clean_reply, dossier_text,
                                              extract_facts, fallback_line)
 from godquant.companion.learner import (extract_facts_llm,
@@ -43,9 +44,10 @@ class CompanionAgent(BaseAgent):
         self.bonds = BondStore(cfg.resolved_memory_db())
         self.mind = Mind(memory, self.bonds)
         self.collector = TrajectoryLogger(cfg.resolved_workspace())
+        self.vault = HistoryVault(cfg.resolved_memory_db())
 
-    # ---------- history (persistent) ----------
-    def _load_history(self, cid: str, limit: int = 20) -> list[dict]:
+    # ---------- history (vault: append-only, nothing lost) ----------
+    def _load_legacy(self, cid: str, limit: int = 100) -> list[dict]:
         try:
             hits = self.memory.search(f"chat {cid}", kind="chat", limit=limit)
         except Exception:
@@ -58,13 +60,28 @@ class CompanionAgent(BaseAgent):
                     hist.append(msg)
             except Exception:
                 continue
-        return hist[-limit:]
+        return hist
+
+    def _load_history(self, cid: str, limit: int = 40) -> list[dict]:
+        try:
+            if self.vault.count(cid) == 0:
+                legacy = self._load_legacy(cid)
+                if legacy:
+                    self.vault.import_legacy(legacy)
+            rows = self.vault.load(cid, limit=limit)
+            return [{"role": r["role"], "content": r["content"]} for r in rows]
+        except Exception:
+            return self._load_legacy(cid, limit=limit)[-limit:]
 
     def _save_msg(self, cid: str, role: str, content: str):
         try:
             self.memory.add("chat", json.dumps({"cid": cid, "role": role,
                                                 "content": content[:2000]}),
                             tags=f"chat {cid}")
+        except Exception:
+            pass
+        try:
+            self.vault.append(cid, role, content)
         except Exception:
             pass
 
@@ -232,7 +249,21 @@ class CompanionAgent(BaseAgent):
                 tool_ctx += f"\n[TOOL:WEB]\n{WS.smart_search(message)}\n"
             except Exception as e:
                 tool_ctx += f"\n[TOOL:WEB failed: {e}]\n"
-        image_ctx = "\n[They sent you a photo 📸]\n" if image_data else ""
+        images: list[str] = []
+        if image_data:
+            try:
+                from godquant.llm.vision import clean_image
+                _raws = image_data if isinstance(image_data, list) else [image_data]
+                images = [clean_image(r) for r in _raws if r]
+            except Exception:
+                images = []
+        if images and self.cfg.offline:
+            image_ctx = "\n[photo attached \u2014 offline mode, I can\u2019t view it right now]\n"
+        elif images:
+            from godquant.llm.vision import describe_hint
+            image_ctx = "\n" + describe_hint(len(images)) + "\n"
+        else:
+            image_ctx = ""
 
         system = render_persona(persona, mood_context=mood_ctx,
                                 history_summary=summary)
@@ -261,13 +292,14 @@ class CompanionAgent(BaseAgent):
         except Exception:
             pass
         convo = "\n".join(f"{'Them' if m['role'] == 'user' else 'You'}: {m['content'][:500]}"
-                          for m in history[-8:])
+                          for m in history[-14:])
         mood_tag = f"\n[MOOD: {mood_state.current} {mood_state.level}/10]"
         user_block = (f"{convo}\nThem: {message}{image_ctx}{tool_ctx}{mood_tag}"
                       if convo else f"Them: {message}{image_ctx}{tool_ctx}{mood_tag}")
 
         sampling = self.moods.sampling(cid)
-        _resp = self.router.complete(system, user_block, agent=self.name)
+        _resp = self.router.complete(system, user_block, agent=self.name,
+                                     images=images or None)
         text = clean_reply(_resp.text or "", message)
         if not text.strip():  # empty reply: nudge once, never placeholder
             text = self.router.complete(
@@ -278,7 +310,7 @@ class CompanionAgent(BaseAgent):
         if not text.strip():
             text = fallback_line(persona, message)
 
-        self._save_msg(cid, "user", message)
+        self._save_msg(cid, "user", message + (" [photo]" if images else ""))
         self._save_msg(cid, "assistant", text)
         self.summarize_if_due(cid, history)
         if getattr(self.cfg, "collect", True):

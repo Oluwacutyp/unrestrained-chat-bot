@@ -425,6 +425,21 @@ async function handleOwnerCommand(text, ctx) {
 
 async function personaCmd(post, channel, arg) {
     const parts = arg.split(/\s+/).filter(Boolean);
+    if (parts.length && ['create', 'show', 'list'].includes(parts[0].toLowerCase())) {
+        const sub = parts[0].toLowerCase();
+        if (sub === 'list') {
+            const r = await post('/persona', { pack_action: 'list' });
+            return 'packs: ' + ((r.packs && r.packs.length) ? r.packs.join(', ') : 'none yet — `.persona create <name>`');
+        }
+        if (parts.length < 2) return 'usage: .persona create|show <name>';
+        const r = await post('/persona', { pack_action: sub, name: parts[1], blurb: parts.slice(2).join(' ') });
+        if (r.error) return 'persona failed: ' + r.error;
+        if (sub === 'create') return `pack [${r.created}] created 📦 — edit personas/${r.created}.md, it merges live`;
+        const d = r.pack || {};
+        let out = `📦 ${r.name}: ${d.blurb || ''}\n` + ['identity', 'voice', 'taboos'].filter(k => d[k]).map(k => `[${k}]\n${d[k].slice(0, 500)}`).join('\n');
+        if (r.learned) out += `\n[learned]\n${r.learned.slice(0, 800)}`;
+        return out.slice(0, 3500) || 'empty pack';
+    }
     if (!parts.length) {
         const r = await post('/persona', null);
         const ov = r.overrides || [];

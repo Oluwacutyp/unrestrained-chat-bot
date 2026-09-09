@@ -398,6 +398,33 @@ class _Handler(BaseHTTPRequestHandler):
                 ch = data.get("channel")
                 cid2 = data.get("chat_id")
                 name = (data.get("persona") or "").strip().lower()
+                pa = (data.get("pack_action") or "").strip().lower()
+                if pa:
+                    import re as _re
+                    from godquant.companion import persona_pack as PP
+                    pname = _re.sub(r"[^a-z0-9-]+", "",
+                                    (data.get("name") or "").strip().lower()
+                                    )[:30]
+                    if pa == "list":
+                        d = PP.pack_dir()
+                        packs = sorted(p.stem for p in d.glob("*.md")
+                                       if not p.name.endswith(".learned.md")) \
+                            if d.exists() else []
+                        return self._json({"packs": packs})
+                    if not pname:
+                        return self._json({"error": "need {name}"}, 400)
+                    if pa == "create":
+                        with self.lock:
+                            pth = PP.scaffold(
+                                pname, (data.get("blurb") or "").strip())
+                        return self._json({"created": pname,
+                                            "path": str(pth)})
+                    if pa == "show":
+                        return self._json({"name": pname,
+                                            "pack": PP.load_pack(pname) or {},
+                                            "learned": PP.read_learned(pname)})
+                    return self._json(
+                        {"error": "pack_action: list|create|show"}, 400)
                 if ch and cid2:
                     if name == "clear":
                         with self.lock:
@@ -634,6 +661,34 @@ class _Handler(BaseHTTPRequestHandler):
                         return self._json(
                             {"error": "no exchange in " + cid}, 404)
                     companion.collector.log_pref(ex["user"], verdict, ex["reply"])
+                    if verdict == "good":
+                        try:
+                            from godquant.companion.persona_pack import \
+                                voice_drift
+                            _r = ex["reply"] or ""
+                            _bits = ["short" if len(_r) < 120 else
+                                     "long" if len(_r) > 400 else "medium"]
+                            _low = _r.lower()
+                            if any(w in _low for w in
+                                   ("wetin", "dey", "abeg", "nawa", "wahala")):
+                                _bits.append("pidgin")
+                            if any(e in _r for e in ("\U0001f496", "\U0001f602",
+                                                    "\U0001f60d", "\u2764")):
+                                _bits.append("emoji")
+                            _ch, _, _who = cid.partition(":")
+                            _pers = cfg.persona
+                            _getp = getattr(companion.bonds, "get_persona",
+                                            None)
+                            if _getp:
+                                try:
+                                    _pers = _getp(_ch, _who) or _pers
+                                except Exception:
+                                    pass
+                            voice_drift(_pers,
+                                        "owner loved a " + "+".join(_bits) +
+                                        " reply")
+                        except Exception:
+                            pass
                 return self._json({"logged": verdict})
             if path == "/cal":
                 b = companion.bonds

@@ -124,7 +124,7 @@ def test_dm_gets_brain_reply(monkeypatch):
     mod.ALLOW.clear()
 
     async def fake_chat_full(text, sid, display, use_search=False,
-                             chat_id=None, is_group=False):
+                             chat_id=None, is_group=False, image=""):
         assert sid == 42 and "hey" in text
         assert chat_id == sid and is_group is False  # DM: context == sender
         return {"response": "heeey babe!! 😍", "mood": "happy",
@@ -181,7 +181,7 @@ def test_group_mention_replies_when_enabled(monkeypatch):
     mod.ALLOW.clear()
     monkeypatch.setattr(mod, "GROUPS", True)
     async def fake_group_chat(t, s, d, use_search=False,
-                              chat_id=None, is_group=False):
+                              chat_id=None, is_group=False, image=""):
         assert chat_id == -100 and is_group is True  # group: shared context
         return {"response": "yo 👀", "mood": "neutral", "substance": 0.1}
     monkeypatch.setattr(mod, "chat_full", fake_group_chat)

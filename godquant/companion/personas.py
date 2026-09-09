@@ -277,4 +277,9 @@ def render_persona(name: str, mood_context: str = "", history_summary: str = "")
     if "{history_summary}" in text:
         text = text.replace("{history_summary}",
                             history_summary or "This is a fresh conversation.")
+    try:
+        from godquant.companion.persona_pack import render_pack
+        text = render_pack(name, text)
+    except Exception:
+        pass
     return text

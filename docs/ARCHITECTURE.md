@@ -70,6 +70,13 @@ fits the same API; SqliteVectorIndex/Chroma later).
   REQUEST DISCIPLINE (answer what's asked, plans only on demand), FORMAT
   DISCIPLINE (no tables/headers/corporate lists, short texts, no assistant
   phrases); regression tests generated via the codegen megabuild.
+- **v5.0 god-tier rebuild ✅ shipped:** `memory/vault.py` (append-only
+  HistoryVault, legacy import-once, limit 40/14); `llm/vision.py` + vision
+  parts in all providers with Groq Llama-4-Scout auto-swap, honest offline
+  fallback; TG/Discord/WA bridges forward photos ≤4MB as data-URLs;
+  `companion/persona_pack.py` (packs as `personas/<name>.md`, `.good`
+  voice-drift into `<name>.learned.md`, list/show/create owner cmds).
+  All new modules generated via `scripts/codegen_megabuild.py`.
 
 ## Reliability bar (every phase)
 

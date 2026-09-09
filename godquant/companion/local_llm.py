@@ -62,7 +62,10 @@ class LlamaCppProvider(BaseProvider):
                           verbose=False)
         return self._llm
 
-    def complete(self, system: str, user: str) -> LLMResponse:
+    def complete(self, system: str, user: str,
+                       images: list | None = None) -> LLMResponse:
+        if images:
+            user += "\n[photo attached \u2014 local model can\u2019t view images]"
         llm = self._load()
         prompt = (f"<|im_start|>system\n{system}<|im_end|>\n"
                   f"<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n")

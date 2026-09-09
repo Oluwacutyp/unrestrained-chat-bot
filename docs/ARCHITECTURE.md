@@ -65,6 +65,11 @@ fits the same API; SqliteVectorIndex/Chroma later).
   DDG `research()` briefs) behind upgraded `web_fetch` + new
   `deep_research` tool + `/research` route + `.research` on both cores;
   `scripts/codegen_megabuild.py` + `codegen` tool, added to CoderAgent.
+- **v4.6.1 persona hotfix ✅ shipped:** Devon prompt gains STREET SMARTS
+  (sub/airtime/urgent-2k lexicon, broke-friend favor rules), FAVOR &
+  REQUEST DISCIPLINE (answer what's asked, plans only on demand), FORMAT
+  DISCIPLINE (no tables/headers/corporate lists, short texts, no assistant
+  phrases); regression tests generated via the codegen megabuild.
 
 ## Reliability bar (every phase)
 

@@ -25,6 +25,7 @@ from godquant.companion.learner import (extract_facts_llm,
 from godquant.companion.relationship import (BondStore, addressing,
                                             parse_bond_id, vibe_context)
 from godquant.memory.mind import Mind
+from godquant.train.collector import TrajectoryLogger
 from godquant.llm import prompts
 from godquant.quant import risk as R
 from godquant.quant.backtest import run_backtest
@@ -41,6 +42,7 @@ class CompanionAgent(BaseAgent):
         self.moods = MoodEngine(memory)
         self.bonds = BondStore(cfg.resolved_memory_db())
         self.mind = Mind(memory, self.bonds)
+        self.collector = TrajectoryLogger(cfg.resolved_workspace())
 
     # ---------- history (persistent) ----------
     def _load_history(self, cid: str, limit: int = 20) -> list[dict]:
@@ -256,8 +258,8 @@ class CompanionAgent(BaseAgent):
                       if convo else f"Them: {message}{image_ctx}{tool_ctx}{mood_tag}")
 
         sampling = self.moods.sampling(cid)
-        text = self.router.complete(system, user_block, agent=self.name).text
-        text = clean_reply(text or "", message)
+        _resp = self.router.complete(system, user_block, agent=self.name)
+        text = clean_reply(_resp.text or "", message)
         if not text.strip():  # empty reply: nudge once, never placeholder
             text = self.router.complete(
                 system, user_block + "\n[SYSTEM: your reply came back empty — "
@@ -270,6 +272,15 @@ class CompanionAgent(BaseAgent):
         self._save_msg(cid, "user", message)
         self._save_msg(cid, "assistant", text)
         self.summarize_if_due(cid, history)
+        if getattr(self.cfg, "collect", True):
+            try:
+                self.collector.log_chat(
+                    message, text, persona, cid, mood_state.current,
+                    bond["level"], _resp.provider, _resp.model,
+                    _resp.prompt_tokens, _resp.completion_tokens,
+                    _resp.cost_usd)
+            except Exception:
+                pass
         return {"response": text,
                 "mood": mood_state.current,
                 "mood_level": mood_state.level,
@@ -320,6 +331,23 @@ class CompanionAgent(BaseAgent):
                 text = text[len(prefix):].strip().strip('"')
         self._save_msg(cid, "assistant", text)
         return text
+
+    def last_exchange(self, cid: str) -> dict | None:
+        """Newest user→assistant pair in a chat (for .good/.bad prefs)."""
+        try:
+            hist = self._load_history(cid, 6)
+        except Exception:
+            return None
+        reply, user = "", ""
+        for m in reversed(hist):
+            if not reply and m.get("role") == "assistant":
+                reply = m.get("content", "")
+            elif reply and m.get("role") == "user":
+                user = m.get("content", "")
+                break
+        if user and reply:
+            return {"user": user, "reply": reply}
+        return None
 
     def reset(self, cid: str = "default"):
         self.moods.reset(cid)

@@ -212,6 +212,26 @@ def cmd_partner(args, cfg, memory, router, orch):
         say(f"\n{out['persona']} [{out['mood']} {out['mood_level']}/10] › {out['response']}\n")
 
 
+def cmd_export_training(args, cfg, memory, router, orch):
+    from godquant.train.collector import TrajectoryLogger
+    from godquant.train.export import build_packs
+    ws = cfg.resolved_workspace()
+    if args.status:
+        st = TrajectoryLogger(ws).stats()
+        say(f"trajectories={st['trajectories']} prefs={st['prefs']} "
+            f"pairs={st['pairs']} bytes={st['bytes']}")
+        return
+    r = build_packs(ws)
+    say(f"✓ sft={r['sft']} dpo={r['dpo']} skipped={r['skipped']}\n{r['dir']}")
+    if args.push:
+        from godquant.train.hf_pipe import push_files
+        import os as _os
+        files = {str(ws / "train" / f): f for f in r["files"]
+                 if (ws / "train" / f).exists()}
+        out = push_files(args.push, files, _os.environ.get("HF_TOKEN", ""))
+        say(f"push → {out}")
+
+
 def cmd_models(args, cfg, memory, router, orch):
     from godquant.companion import local_llm as LL
     if args.download:
@@ -516,6 +536,9 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--cid", default="cli")
     pc.add_argument("--search", action="store_true")
 
+    ex = sub.add_parser("export-training", help="training packs from collected data")
+    ex.add_argument("--status", action="store_true", help="show collection stats")
+    ex.add_argument("--push", default=None, help="push packs to user/repo (needs HF_TOKEN)")
     md = sub.add_parser("models", help="list/download local GGUF models")
     md.add_argument("--download", default=None)
 
@@ -554,7 +577,7 @@ _HANDLERS = {"chat": cmd_chat, "mission": cmd_mission, "build": cmd_build,
              "doctor": cmd_doctor, "config": cmd_config,
              "serve": cmd_serve, "partner": cmd_partner, "models": cmd_models,
              "send": cmd_send, "tick": cmd_tick, "contacts": cmd_contacts,
-             "setup": cmd_setup}
+             "setup": cmd_setup, "export-training": cmd_export_training}
 
 
 def main(argv: list[str] | None = None):

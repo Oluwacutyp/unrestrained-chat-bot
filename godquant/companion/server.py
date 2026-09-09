@@ -30,6 +30,7 @@ API is backward compatible with whatsapp.js:
   GET  /journal /brief + POST /dream /note /fetch → memory + briefing
   GET  /recall?q=&scope= | GET|POST /memories → unified memory ops
   GET|POST /missions → persistent projects (create/list/get/resume)
+  GET /train/status|/train/script + POST /train/export|/train/push|/pref
 GET / serves the single-file chat UI (mobile-first, Termux-friendly).
 """
 from __future__ import annotations
@@ -220,6 +221,17 @@ class _Handler(BaseHTTPRequestHandler):
                 {"id": m["id"], "goal": m["goal"][:200], "status": m["status"],
                  "steps": [{"agent": s2["agent"], "status": s2["status"]}
                            for s2 in m["steps"]]} for m in out]})
+        if parsed.path == "/train/status":
+            from godquant.train.collector import TrajectoryLogger
+            with self.lock:
+                st = TrajectoryLogger(cfg.resolved_workspace()).stats()
+            return self._json(st)
+        if parsed.path == "/train/script":
+            from godquant.train.hf_pipe import training_script
+            return self._json({"script": training_script(
+                q.get("model", ["Qwen/Qwen2.5-1.5B-Instruct"])[0],
+                q.get("dataset", ["user/personal-sft"])[0],
+                q.get("out", ["user/personal-devon"])[0])})
         if parsed.path == "/mood":
             with self.lock:
                 return self._json(companion.moods.snapshot(cid))
@@ -559,6 +571,38 @@ class _Handler(BaseHTTPRequestHandler):
                     ms.close()
                 return self._json({"error": "action: list|get|create|resume"},
                                   400)
+            if path == "/train/export":
+                from godquant.train.export import build_packs
+                with self.lock:
+                    return self._json(build_packs(cfg.resolved_workspace()))
+            if path == "/train/push":
+                import os as _os
+                from godquant.train.hf_pipe import push_files
+                repo = (data.get("repo") or "").strip()
+                tdir = _os.path.join(str(cfg.resolved_workspace()), "train")
+                files = {}
+                for f in ("sft.jsonl", "dpo.jsonl", "README.md"):
+                    if _os.path.exists(_os.path.join(tdir, f)):
+                        files[_os.path.join(tdir, f)] = f
+                if not files:
+                    return self._json(
+                        {"error": "nothing to push — export first"}, 400)
+                return self._json(push_files(
+                    repo, files, data.get("token", ""),
+                    private=bool(data.get("private", True))))
+            if path == "/pref":
+                cid = (data.get("cid") or "").strip()
+                verdict = (data.get("verdict") or "").strip().lower()
+                if not cid or verdict not in ("good", "bad"):
+                    return self._json(
+                        {"error": "need {cid, verdict good|bad}"}, 400)
+                with self.lock:
+                    ex = companion.last_exchange(cid)
+                    if not ex:
+                        return self._json(
+                            {"error": "no exchange in " + cid}, 404)
+                    companion.collector.log_pref(ex["user"], verdict, ex["reply"])
+                return self._json({"logged": verdict})
             if path == "/warn":
                 msg = (data.get("message") or "").strip()[:500]
                 if not msg:

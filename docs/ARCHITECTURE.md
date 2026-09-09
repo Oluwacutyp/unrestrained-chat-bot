@@ -35,11 +35,12 @@ fits the same API; SqliteVectorIndex/Chroma later).
   levels, audit log) replacing regex tools; missions v2 (persistent,
   resumable, sub-agents, tick progress, self-critique gate); fixed
   `depends_on` (topological waves) in the orchestrator fan-out.
-- **v4.2 personal-model path:** JSONL trajectory logging on every
-  chat/mission; `.good`/`.bad` preference pairs; `gq export-training`
-  (SFT + DPO packs); one-command LoRA script (RunPod/Colab) → GGUF →
-  existing `llamacpp` provider. Training happens off-phone; the *data
-  asset* is collected on-phone starting now.
+- **v4.2 personal-model path ✅ shipped:** JSONL trajectory logging on
+  every chat/mission; `.good`/`.bad` preference pairs; `gq.py
+  export-training` (SFT + DPO packs + card); HF-native pipe
+  (`hf_pipe`: dataset push to the user's account, one-file TRL SFT+LoRA
+  →DPO script, Gradio Space scaffold). AutoTrain rejected (dead upstream);
+  training runs off-phone, the *data asset* is collected on-phone.
 - **v4.3 life-OS + creative:** calendar, finance/health logs, project
   tracking, world bibles for long-running creative consistency.
 

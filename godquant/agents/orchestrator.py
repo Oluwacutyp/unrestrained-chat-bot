@@ -167,6 +167,14 @@ class Orchestrator:
                 steps[i]["status"] = "fail"
         failed = [s for s in steps if s["status"] == "fail"]
         store.finish(mid, "done" if not failed else "failed")
+        if getattr(self.cfg, "collect", True):
+            try:
+                from godquant.train.collector import TrajectoryLogger
+                TrajectoryLogger(self.cfg.resolved_workspace()).log_mission(
+                    goal, "done" if not failed else "failed",
+                    "\n".join((s2["result"] or "")[:500] for s2 in steps))
+            except Exception:
+                pass
         summary = "\n\n".join(f"[{s['agent']}] {(s['result'] or '')[:1500]}"
                                 for s in steps)
         try:

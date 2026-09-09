@@ -74,6 +74,11 @@ async function main() {
         if (path === '/missions' && payload.action === 'create') return { started: true };
         if (path === '/missions' && payload.action === 'resume') return payload.id === 1 ? { started: true } : { error: 'x' };
         if (path === '/missions') return { missions: [{ id: 1, status: 'done', goal: 'research lizards' }] };
+        if (path === '/pref') return payload.cid === 'whatsapp:nobody' ? { error: 'x' } : { logged: payload.verdict };
+        if (path === '/train/status') return { trajectories: 10, prefs: 2, pairs: 1, bytes: 99 };
+        if (path === '/train/export') return { sft: 9, dpo: 1, skipped: 1, dir: '/w/train' };
+        if (path === '/train/push') return { ok: true, repo: 'u/d', pushed: ['sft.jsonl'] };
+        if (path.startsWith('/train/script')) return { script: 'SFTTrainer...' };
         throw new Error('unexpected ' + path);
     }
     const ctx = {
@@ -144,6 +149,12 @@ async function main() {
     has(await run('.project'), 'usage', 'project usage');
     has(await run('.projects'), '#1', 'projects');
     has(await run('.resume 1'), 'resumed', 'resume');
+    has(await run('.good'), 'banked', 'good');
+    has(await run('.bad'), "won't", 'bad');
+    has(await run('.train'), 'trajectories: 10', 'train status');
+    has(await run('.train export'), 'sft=9', 'train export');
+    has(await run('.train push u/d'), 'u/d', 'train push');
+    has(await run('.train script'), 'SFTTrainer', 'train script');
     console.log(`wa_owner.js OK (${n} asserts)`);
 }
 

@@ -17,12 +17,12 @@ HELP = {
                  "`.send <chat> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                  "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                  "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.help`"),
+                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.train …` `.good` `.bad` `.help`"),
     "discord": ("discord cmds: `.mission <goal>` `.code <task>` `.exec <shell>` `.tick` "
                 "`.send <id> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                 "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                 "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.help`"),
+                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.train …` `.good` `.bad` `.help`"),
 }
 
 
@@ -273,6 +273,37 @@ async def run_owner_command(api, channel: str, cmd: str, arg: str,
         if r.get("started"):
             return "resumed 🚀"
         return f"resume failed: {r.get('error')}"
+    if cmd in ("good", "bad"):
+        r = await api("/pref", {"cid": f"{channel}:{chat}", "verdict": cmd})
+        if r.get("error"):
+            return f"pref failed: {r['error']}"
+        return ("noted 👍 — training data banked" if cmd == "good"
+                else "noted 👎 — won't do that again")
+    if cmd == "train":
+        parts = arg.split(None, 1)
+        sub = parts[0].lower() if parts else "status"
+        if sub == "status":
+            r = await api("/train/status")
+            return (f"🧬 trajectories: {r.get('trajectories', 0)} | prefs: "
+                    f"{r.get('prefs', 0)} (pairs {r.get('pairs', 0)}) | "
+                    f"{r.get('bytes', 0)} bytes")
+        if sub == "export":
+            r = await api("/train/export", {})
+            if r.get("error"):
+                return f"export failed: {r['error']}"
+            return (f"📦 sft={r.get('sft')} dpo={r.get('dpo')} "
+                    f"skipped={r.get('skipped')} → {r.get('dir')}")
+        if sub == "push" and len(parts) > 1:
+            r = await api("/train/push", {"repo": parts[1].strip()},
+                          timeout=300)
+            if not r.get("ok"):
+                return f"push failed: {r.get('error')}"
+            return f"☁️ pushed to {r.get('repo')}: " + ", ".join(r.get("pushed", []))
+        if sub == "script":
+            out = parts[1].strip() if len(parts) > 1 else "user/personal-devon"
+            r = await api("/train/script?out=" + quote(out))
+            return (r.get("script") or "")[:3500]
+        return "usage: .train status|export|push <user/repo>|script [out]"
     if cmd == "stats":
         r = await api("/status")
         mems = r.get("memories", {})

@@ -19,7 +19,8 @@ const HELP = 'wa cmds: `.mission <goal>` `.code <task>` `.exec <shell>` `.tick` 
     '`.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` ' +
     '`.snooze <id> <when>` ' +
     '`.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` ' +
-    '`.project <goal>` `.projects` `.resume <id>` `.help`';
+    '`.project <goal>` `.projects` `.resume <id>` `.train …` ' +
+    '`.good` `.bad` `.help`';
 
 function parseOwnerCommand(text) {
     const t = (text || '').trim();
@@ -280,6 +281,35 @@ async function handleOwnerCommand(text, ctx) {
         if (!/^\d+$/.test(arg)) return 'usage: .resume <project id>';
         const r = await post('/missions', { action: 'resume', id: parseInt(arg, 10) });
         return r.started ? 'resumed 🚀' : 'resume failed: ' + r.error;
+    }
+    if (cmd === 'good' || cmd === 'bad') {
+        const r = await post('/pref', { cid: channel + ':' + (ctx.chatId || 'me'), verdict: cmd });
+        if (r.error) return 'pref failed: ' + r.error;
+        return cmd === 'good' ? 'noted 👍 — training data banked' : "noted 👎 — won't do that again";
+    }
+    if (cmd === 'train') {
+        const sp = arg.indexOf(' ');
+        const sub = ((sp < 0 ? arg : arg.slice(0, sp)) || 'status').toLowerCase();
+        const rest = sp < 0 ? '' : arg.slice(sp + 1).trim();
+        if (sub === 'status') {
+            const r = await post('/train/status', null);
+            return `🧬 trajectories: ${r.trajectories || 0} | prefs: ${r.prefs || 0} (pairs ${r.pairs || 0}) | ${r.bytes || 0} bytes`;
+        }
+        if (sub === 'export') {
+            const r = await post('/train/export', {});
+            if (r.error) return 'export failed: ' + r.error;
+            return `📦 sft=${r.sft} dpo=${r.dpo} skipped=${r.skipped} → ${r.dir}`;
+        }
+        if (sub === 'push' && rest) {
+            const r = await post('/train/push', { repo: rest }, 300000);
+            if (!r.ok) return 'push failed: ' + r.error;
+            return `☁️ pushed to ${r.repo}: ` + (r.pushed || []).join(', ');
+        }
+        if (sub === 'script') {
+            const r = await post('/train/script?out=' + encodeURIComponent(rest || 'user/personal-devon'), null);
+            return (r.script || '').slice(0, 3500);
+        }
+        return 'usage: .train status|export|push <user/repo>|script [out]';
     }
     if (cmd === 'fetch') {
         if (!arg) return 'usage: .fetch <url>';

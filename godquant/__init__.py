@@ -4,7 +4,7 @@ Termux-first: zero mandatory pip dependencies (stdlib only).
 Optional accelerators: requests, numpy, yfinance, rich.
 """
 
-__version__ = "3.8.0"
+__version__ = "4.0.0"
 __author__ = "God Quant AI"
 
 from godquant.config import GodQuantConfig, load_config

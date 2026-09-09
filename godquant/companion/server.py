@@ -28,6 +28,7 @@ API is backward compatible with whatsapp.js:
   POST /remind {action,text,due_ts..} → reminders that fire via outbox
   POST /want {text..} + GET|POST /mind → intentions engine
   GET  /journal /brief + POST /dream /note /fetch → memory + briefing
+  GET  /recall?q=&scope= | GET|POST /memories → unified memory ops
 GET / serves the single-file chat UI (mobile-first, Termux-friendly).
 """
 from __future__ import annotations
@@ -194,6 +195,18 @@ class _Handler(BaseHTTPRequestHandler):
             with self.lock:
                 pend = self.engine.outbox.stats()["outbox"].get("pending", 0)
                 return self._json({"brief": build_brief(companion.bonds, pend)})
+        if parsed.path == "/recall":
+            with self.lock:
+                hits = self.mind.recall(
+                    q.get("q", [""])[0], scope=q.get("scope", [""])[0] or None,
+                    limit=int(q.get("limit", ["8"])[0] or 8))
+            return self._json({"hits": hits})
+        if parsed.path == "/memories":
+            with self.lock:
+                mems = self.mind.inspect(
+                    scope=q.get("scope", [""])[0], layer=q.get("layer", [""])[0],
+                    limit=int(q.get("limit", ["50"])[0] or 50))
+            return self._json({"memories": mems})
         if parsed.path == "/mood":
             with self.lock:
                 return self._json(companion.moods.snapshot(cid))
@@ -469,7 +482,7 @@ class _Handler(BaseHTTPRequestHandler):
                     cmap = {f"{c['channel']}:{c['chat_id']}": c["display"]
                             for c in self.engine.outbox.list_contacts()
                             if c["display"]}
-                    return self._json(run_dream(companion.bonds, cmap))
+                    return self._json(run_dream(companion.bonds, cmap, mind=self.mind))
             if path == "/fetch":
                 import re as _re
                 import urllib.request as _url
@@ -490,6 +503,21 @@ class _Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": True, "title": title, "text": text})
                 except Exception as e:
                     return self._json({"error": f"fetch failed: {e}"}, 502)
+            if path == "/memories":
+                act = (data.get("action") or "").lower()
+                mid = int(data.get("id", 0))
+                with self.lock:
+                    if act == "pin":
+                        return self._json({"ok": self.mind.pin(mid, True)})
+                    if act == "unpin":
+                        return self._json({"ok": self.mind.pin(mid, False)})
+                    if act == "edit" and data.get("content"):
+                        return self._json({"ok": self.mind.edit(
+                            mid, data["content"])})
+                    if act == "delete":
+                        return self._json({"ok": self.mind.forget(mid)})
+                return self._json(
+                    {"error": "action: pin|unpin|edit|delete + id"}, 400)
             if path == "/warn":
                 msg = (data.get("message") or "").strip()[:500]
                 if not msg:
@@ -624,6 +652,8 @@ def create_server(cfg, router, memory, orch, companion,
     _Handler.stack = (cfg, router, memory, orch, companion)
     _Handler.outbox = Outbox(cfg.resolved_memory_db())
     _Handler.engine = ProactiveEngine(cfg, companion, _Handler.outbox)
+    from godquant.memory.mind import Mind
+    _Handler.mind = Mind(memory, companion.bonds)
     srv = ThreadingHTTPServer(
         (host or cfg.server_host,
          port if port is not None else cfg.server_port),

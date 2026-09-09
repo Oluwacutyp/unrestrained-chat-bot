@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS bond_facts (
   fkey TEXT NOT NULL,
   fvalue TEXT NOT NULL,
   updated REAL NOT NULL,
+  importance REAL DEFAULT 0.5,
+  confidence REAL DEFAULT 0.8,
+  pinned INTEGER DEFAULT 0,
   PRIMARY KEY (channel, chat_id, fkey, fvalue)
 );
 """
@@ -276,6 +279,14 @@ class BondStore:
         self._lock = threading.Lock()
         with self._lock:
             self._conn.executescript(_SCHEMA + _FACTS_SCHEMA + _PERSONA_SCHEMA + _MIND_SCHEMA)
+            _fh = {r[1] for r in self._conn.execute(
+                "PRAGMA table_info(bond_facts)").fetchall()}
+            for _col, _ddl in (("importance", "REAL DEFAULT 0.5"),
+                               ("confidence", "REAL DEFAULT 0.8"),
+                               ("pinned", "INTEGER DEFAULT 0")):
+                if _col not in _fh:
+                    self._conn.execute(
+                        f"ALTER TABLE bond_facts ADD COLUMN {_col} {_ddl}")
             have = {r[1] for r in self._conn.execute(
                 "PRAGMA table_info(bonds)").fetchall()}
             for col, ddl in _NEW_COLS.items():
@@ -437,7 +448,8 @@ class BondStore:
 
     # ---- per-sender facts / dossier ----
     def add_fact(self, channel: str, chat_id: str, key: str, value: str,
-                 now: float | None = None) -> list[tuple[str, str]]:
+                 now: float | None = None, importance: float = 0.5,
+                 confidence: float = 0.8) -> list[tuple[str, str]]:
         """Store one durable fact. Single-value keys replace; rest accumulate."""
         import time as _t
         from godquant.companion.memory_engine import SINGLE_KEYS
@@ -452,8 +464,8 @@ class BondStore:
                     (channel, chat_id, key))
             self._conn.execute(
                 "INSERT OR IGNORE INTO bond_facts(channel,chat_id,fkey,fvalue,"
-                "updated) VALUES(?,?,?,?,?)",
-                (channel, chat_id, key, value, now))
+                "updated,importance,confidence) VALUES(?,?,?,?,?,?,?)",
+                (channel, chat_id, key, value, now, importance, confidence))
             self._conn.commit()
         return self.get_facts(channel, chat_id)
 
@@ -699,3 +711,15 @@ class BondStore:
                 "DELETE FROM bond_facts WHERE channel=? AND chat_id=? AND fkey=?",
                 (channel, str(chat_id), key))
             self._conn.commit()
+
+    def facts_meta(self, channel: str, chat_id: str) -> list[dict]:
+        """Facts with importance/confidence/pinned for ranked dossiers."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT fkey,fvalue,updated,importance,confidence,pinned "
+                "FROM bond_facts WHERE channel=? AND chat_id=? ORDER BY updated",
+                (channel, str(chat_id)))
+            return [{"key": r[0], "value": r[1], "updated": r[2],
+                     "importance": r[3] if r[3] is not None else 0.5,
+                     "confidence": r[4] if r[4] is not None else 0.8,
+                     "pinned": bool(r[5])} for r in cur.fetchall()]

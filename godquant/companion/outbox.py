@@ -310,7 +310,9 @@ class ProactiveEngine:
                 return
             cmap = {f"{c['channel']}:{c['chat_id']}": c["display"]
                     for c in self.outbox.list_contacts() if c["display"]}
-            rep = run_dream(self.companion.bonds, cmap, now)
+            from godquant.memory.mind import Mind
+            rep = run_dream(self.companion.bonds, cmap, now,
+                            Mind(self.companion.memory, self.companion.bonds))
             log.info("dream: %s", rep)
         except Exception as e:
             log.warning("dream failed: %s", e)

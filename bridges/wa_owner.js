@@ -18,7 +18,7 @@ const HELP = 'wa cmds: `.mission <goal>` `.code <task>` `.exec <shell>` `.tick` 
     '`.remind <when> <text>` `.reminders` `.cancel <id>` `.want <goal>` ' +
     '`.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` ' +
     '`.snooze <id> <when>` ' +
-    '`.dream` `.brief` `.fetch <url>` `.help`';
+    '`.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.help`';
 
 function parseOwnerCommand(text) {
     const t = (text || '').trim();
@@ -235,6 +235,34 @@ async function handleOwnerCommand(text, ctx) {
     if (cmd === 'brief') {
         const r = await post('/brief', null);
         return r.brief || '(no brief)';
+    }
+    if (cmd === 'recall') {
+        if (!arg) return 'usage: .recall <query>';
+        const r = await post('/recall?q=' + encodeURIComponent(arg) + '&scope=*&limit=6', null);
+        const hits = r.hits || [];
+        if (!hits.length) return 'nothing recalled 🧠';
+        return hits.map(h => `#${h.id} [${h.layer}/${h.scope}] ${h.content.slice(0, 150)}${h.pinned ? ' 📌' : ''}`).join('\n').slice(0, 3500);
+    }
+    if (cmd === 'mem') {
+        const parts = arg.split(/\s+/).filter(Boolean);
+        if (!parts.length || parts[0].toLowerCase() === 'list') {
+            const scope = parts.length > 1 ? parts[1] : '';
+            const r = await post('/memories?scope=' + encodeURIComponent(scope) + '&limit=15', null);
+            const ms = r.memories || [];
+            if (!ms.length) return 'no memories stored 🧠';
+            return ms.map(m => `#${m.id} [${m.layer}/${m.scope}] ${m.content.slice(0, 120)}${m.pinned ? ' 📌' : ''}`).join('\n').slice(0, 3500);
+        }
+        const sub = parts[0].toLowerCase();
+        if ((sub === 'pin' || sub === 'unpin' || sub === 'del' || sub === 'delete') && parts.length > 1 && /^\d+$/.test(parts[1])) {
+            const act = (sub === 'del' || sub === 'delete') ? 'delete' : sub;
+            const r = await post('/memories', { action: act, id: parseInt(parts[1], 10) });
+            return r.ok ? 'done ✅' : 'no such memory';
+        }
+        if (sub === 'edit' && parts.length > 2 && /^\d+$/.test(parts[1])) {
+            const r = await post('/memories', { action: 'edit', id: parseInt(parts[1], 10), content: parts.slice(2).join(' ') });
+            return r.ok ? 'edited ✅' : 'no such memory';
+        }
+        return 'usage: .mem list [scope] | pin|unpin|del <id> | edit <id> <text>';
     }
     if (cmd === 'fetch') {
         if (!arg) return 'usage: .fetch <url>';

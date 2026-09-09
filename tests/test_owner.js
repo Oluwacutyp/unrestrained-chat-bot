@@ -68,6 +68,9 @@ async function main() {
         if (path === '/dream') return { chats: 2, merged: 1, journal: 2, intentions: [1], conflicts: ['a b → c'] };
         if (path === '/brief') return { brief: '☀️ brief — today' };
         if (path === '/fetch') return payload.url === 'bad' ? { error: 'nope' } : { title: 'T', text: 'hello world' };
+        if (path.startsWith('/recall')) return { hits: [{ id: 3, layer: 'semantic', scope: 'global', content: 'vault code', pinned: true }] };
+        if (path.startsWith('/memories?')) return { memories: [{ id: 3, layer: 'semantic', scope: 'global', content: 'vault code', pinned: false }] };
+        if (path === '/memories') return { ok: payload.id === 3 };
         throw new Error('unexpected ' + path);
     }
     const ctx = {
@@ -128,6 +131,12 @@ async function main() {
     has(await run('.snooze 5 in 2h'), 'snoozed', 'snooze');
     has(await run('.snooze x'), 'usage', 'snooze usage');
     has(await run('.snooze 9 in 2h'), 'no such', 'snooze missing');
+    has(await run('.recall vault'), '#3', 'recall');
+    has(await run('.recall'), 'usage', 'recall usage');
+    has(await run('.mem list'), '#3', 'mem list');
+    has(await run('.mem pin 3'), 'done', 'mem pin');
+    has(await run('.mem del 9'), 'no such', 'mem missing');
+    has(await run('.mem edit 3 new text'), 'edited', 'mem edit');
     console.log(`wa_owner.js OK (${n} asserts)`);
 }
 

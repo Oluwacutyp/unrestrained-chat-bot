@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 import time
 from datetime import datetime, timedelta
+from urllib.parse import quote
 
 PERSONAS = ("devon", "alex", "companion", "realistic", "quant")
 
@@ -16,12 +17,12 @@ HELP = {
                  "`.send <chat> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                  "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                  "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.help`"),
+                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.help`"),
     "discord": ("discord cmds: `.mission <goal>` `.code <task>` `.exec <shell>` `.tick` "
                 "`.send <id> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                 "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                 "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.help`"),
+                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.help`"),
 }
 
 
@@ -218,6 +219,38 @@ async def run_owner_command(api, channel: str, cmd: str, arg: str,
             return f"fetch failed: {r['error']}"
         head = f"📰 {r['title']}\n" if r.get("title") else ""
         return (head + (r.get("text") or "")[:3000]) or "(empty page)"
+    if cmd == "recall":
+        if not arg.strip():
+            return "usage: .recall <query>"
+        r = await api(f"/recall?q={quote(arg.strip())}&scope=*&limit=6")
+        hits = r.get("hits", [])
+        if not hits:
+            return "nothing recalled 🧠"
+        return "\n".join(
+            f"#{h['id']} [{h['layer']}/{h['scope']}] {h['content'][:150]}" +
+            (" 📌" if h["pinned"] else "") for h in hits)[:3500]
+    if cmd == "mem":
+        parts = arg.split(None, 2)
+        if not parts or parts[0].lower() == "list":
+            scope = parts[1] if len(parts) > 1 else ""
+            r = await api(f"/memories?scope={quote(scope)}&limit=15")
+            ms = r.get("memories", [])
+            if not ms:
+                return "no memories stored 🧠"
+            return "\n".join(
+                f"#{m['id']} [{m['layer']}/{m['scope']}] {m['content'][:120]}" +
+                (" 📌" if m["pinned"] else "") for m in ms)[:3500]
+        sub = parts[0].lower()
+        if sub in ("pin", "unpin", "del", "delete") and len(parts) > 1 \
+                and parts[1].isdigit():
+            act = "delete" if sub in ("del", "delete") else sub
+            r = await api("/memories", {"action": act, "id": int(parts[1])})
+            return "done ✅" if r.get("ok") else "no such memory"
+        if sub == "edit" and len(parts) > 2 and parts[1].isdigit():
+            r = await api("/memories", {"action": "edit", "id": int(parts[1]),
+                                        "content": parts[2]})
+            return "edited ✅" if r.get("ok") else "no such memory"
+        return "usage: .mem list [scope] | pin|unpin|del <id> | edit <id> <text>"
     if cmd == "stats":
         r = await api("/status")
         mems = r.get("memories", {})

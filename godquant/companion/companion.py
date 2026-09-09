@@ -24,6 +24,7 @@ from godquant.companion.learner import (extract_facts_llm,
                                           style_lessons)
 from godquant.companion.relationship import (BondStore, addressing,
                                             parse_bond_id, vibe_context)
+from godquant.memory.mind import Mind
 from godquant.llm import prompts
 from godquant.quant import risk as R
 from godquant.quant.backtest import run_backtest
@@ -39,6 +40,7 @@ class CompanionAgent(BaseAgent):
         super().__init__(cfg, router, memory)
         self.moods = MoodEngine(memory)
         self.bonds = BondStore(cfg.resolved_memory_db())
+        self.mind = Mind(memory, self.bonds)
 
     # ---------- history (persistent) ----------
     def _load_history(self, cid: str, limit: int = 20) -> list[dict]:
@@ -199,14 +201,27 @@ class CompanionAgent(BaseAgent):
                 self.bonds.add_fact(bch, bwho, _k, _v)
             except Exception:
                 pass
+        if bond["substance"] >= 0.5 and not bond["spam"]:
+            try:  # weighty moments become episodic memory
+                self.mind.log_episode(f"{bch}:{bwho}", sender_name or bwho,
+                                      message[:300], bond["substance"])
+            except Exception:
+                pass
         if len(history) >= 6:  # learn texting style from every chat
             try:
                 for _k, _v in style_lessons(history):
                     self.bonds.add_fact(bch, bwho, _k, _v)
             except Exception:
                 pass
-        dossier_block = dossier_text(self.bonds.get_facts(bch, bwho),
-                                     sender_name or bwho)
+        _facts = self.bonds.get_facts(bch, bwho)
+        try:  # pinned + important facts first in the dossier
+            _meta = {(m["key"], m["value"]): (m["pinned"], m["importance"])
+                     for m in self.bonds.facts_meta(bch, bwho)}
+            _facts = sorted(_facts, key=lambda kv: _meta.get(kv, (False, 0.5)),
+                            reverse=True)
+        except Exception:
+            pass
+        dossier_block = dossier_text(_facts, sender_name or bwho)
 
         tool_ctx = self._maybe_tools(message)
         if use_search and "[TOOL:WEB]" not in tool_ctx:
@@ -230,6 +245,10 @@ class CompanionAgent(BaseAgent):
         mem_block = self.recall(cid, message)
         if mem_block:
             system += mem_block
+        try:  # unified recall: global + this chat's knowledge
+            system += self.mind.recall_block(message, scope=f"{bch}:{bwho}")
+        except Exception:
+            pass
         convo = "\n".join(f"{'Them' if m['role'] == 'user' else 'You'}: {m['content'][:500]}"
                           for m in history[-8:])
         mood_tag = f"\n[MOOD: {mood_state.current} {mood_state.level}/10]"

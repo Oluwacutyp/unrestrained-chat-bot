@@ -20,7 +20,7 @@ function has(a, b, msg) {
 async function main() {
     // parse
     eq(ownerCmd.parseOwnerCommand('hello'), null, 'non-cmd');
-    eq(ownerCmd.parseOwnerCommand('.').cmd, '', 'dot-only → help');
+    eq(ownerCmd.parseOwnerCommand('.'), null, 'dot-only');
     let p = ownerCmd.parseOwnerCommand('.BOND 42 3');
     eq(p.cmd, 'bond', 'cmd lower');
     eq(p.arg, '42 3', 'arg keep');

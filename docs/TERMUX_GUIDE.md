@@ -212,6 +212,22 @@ they live outside git. If a process was started in another Termux session,
 Manual way: `pkill -f "bot.py serve"; pkill -f telegram_userbot`, then
 `git pull` and re-run both commands.
 
+## 8.6 Cloning to other devices / accounts
+
+Yes — clone the repo anywhere, each install is independent:
+
+- **New device, same Telegram account:** fresh clone, own `TG_SESSION`
+  (never copy `.session` files between devices — one login each). Memory and
+  bonds are per-device (separate sqlite DBs); copy `~/.godquant/*.db` over
+  manually if you want shared memory (stop the bot first).
+- **⚠️ Don't run two live userbots on the SAME account** — both would reply
+  to every message (double texts). One brain per account; other devices can
+  run different accounts (different `TG_API_ID`/login) or just the brain.
+- **Ports:** second brain on one machine → change `GQ_PORT`/server port and
+  point that install's bridges at it (`GQ_SERVER=...`).
+- **WhatsApp on Termux:** use the Baileys bridge (no browser needed):
+  `node bridges/whatsapp_baileys.js` with `WA_PAIR_NUMBER` set.
+
 ## 9. Security notes (read once)
 
 - `~/.godquant/env.sh` + `tg_userbot.session` = your keys + your Telegram login.

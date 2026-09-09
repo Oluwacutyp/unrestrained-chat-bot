@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -64,6 +65,8 @@ HUMAN_WPM = int(os.environ.get("HUMAN_WPM", "45"))
 limiter = RateLimiter(max_per_min=int(os.environ.get("HUMAN_MAXPM", "20")),
                       min_chat_gap=float(os.environ.get("HUMAN_GAP", "4")))
 exchanges = ExchangeTracker()
+_warn_last: dict = {}   # kind -> last ts (self-alert throttle)
+BRIDGE_CLIENT = None     # live telethon client (for .import)
 
 
 def _require_creds():
@@ -85,7 +88,26 @@ def _api(path: str, payload: dict | None = None, timeout: int = 120):
 
 
 async def api(path, payload=None, timeout=120):
-    return await asyncio.to_thread(_api, path, payload, timeout)
+    try:
+        return await asyncio.to_thread(_api, path, payload, timeout)
+    except Exception as e:
+        if path != "/warn":
+            await warn("brain_offline", f"brain unreachable ({SERVER}): {e}")
+        raise
+
+
+async def warn(kind: str, message: str):
+    """Self-alert to Saved Messages (throttled 5 min per kind). Never raises."""
+    try:
+        now = time.time()
+        if now - _warn_last.get(kind, 0) < 300:
+            return
+        _warn_last[kind] = now
+        await asyncio.to_thread(_api, "/warn", {"channel": "telegram",
+                                                 "kind": kind,
+                                                 "message": message[:400]}, 15)
+    except Exception:
+        pass
 
 
 # ---------- helpers ----------
@@ -198,7 +220,7 @@ async def run_user_cmd(cmd: str, arg: str, sender_id: int) -> str | None:
 # owner commands (YOU, via outgoing messages starting with PREFIX, anywhere)
 HELP = ("userbot cmds: `.mission <goal>` `.tick` `.send <chat> <msg>` "
         "`.contacts` `.mood [chat]` `.reset [chat]` `.persona <n>` "
-        "`.bond [chat] [0-3|auto]` `.memory [chat]` `.help`")
+        "`.bond [chat] [0-3|auto]` `.memory [chat]` `.import <chat>` `.help`")
 
 
 async def run_owner_cmd(cmd: str, arg: str) -> str:
@@ -234,6 +256,37 @@ async def run_owner_cmd(cmd: str, arg: str) -> str:
         global PERSONA
         PERSONA = arg.strip()
         return f"persona → {PERSONA}"
+    if cmd == "import":
+        if BRIDGE_CLIENT is None:
+            return "client not ready — try again in a few seconds"
+        parts = arg.split()
+        if not parts:
+            return "usage: .import <chat_id|username|me> [limit≤300]"
+        target, limit = parts[0], 200
+        for p in parts[1:]:
+            if p.isdigit():
+                limit = min(300, int(p))
+        try:
+            entity = await BRIDGE_CLIENT.get_entity(target)
+            cid = str(getattr(entity, "id", target))
+            recs = []
+            async for m in BRIDGE_CLIENT.iter_messages(entity, limit=limit):
+                t = getattr(m, "text", None) or ""
+                if not t.strip():
+                    continue
+                d = getattr(m, "date", None)
+                recs.append({"role": "assistant" if getattr(m, "out", False)
+                             else "user", "text": t[:1000],
+                             "ts": d.timestamp() if d else 0,
+                             "sender": str(getattr(m, "sender_id", None) or cid)})
+            recs.reverse()
+            r = await api("/import", {"channel": "telegram", "chat_id": cid,
+                                      "messages": recs}, timeout=120)
+        except Exception as e:
+            return f"import failed: {e}"
+        facts = r.get("facts", [])
+        head = f"imported {r.get('imported', 0)} msgs, learned {len(facts)} facts"
+        return head if not facts else head + ": " + ", ".join(facts[:12])
     if cmd == "memory":
         target = arg.strip() or "me"
         r = await api(f"/memory?channel=telegram&chat_id={target}")
@@ -339,6 +392,7 @@ async def handle_incoming(event, client, me) -> str | None:
         return reply
     except Exception as e:
         log.warning("reply failed: %s", e)
+        await warn("reply_failed", f"reply to {sid} failed: {e}")
         try:
             await event.reply("hey, something went wrong on my end 😔 try again?")
         except Exception:
@@ -417,6 +471,8 @@ async def main():
     _require_creds()
     client = TelegramClient(SESSION, API_ID, API_HASH)
     await client.start()  # interactive phone+code login on first run
+    global BRIDGE_CLIENT
+    BRIDGE_CLIENT = client
     me = await client.get_me()
     print(f"✓ logged in as @{getattr(me, 'username', me.id)} ({me.id}) → {SERVER}")
 
@@ -438,6 +494,7 @@ async def main():
                 await deliver_outbox(client)
             except Exception as e:
                 log.debug("outbox poll: %s", e)
+                await warn("outbox", f"outbox poll failed: {e}")
             await asyncio.sleep(POLL)
 
     asyncio.create_task(outbox_loop())

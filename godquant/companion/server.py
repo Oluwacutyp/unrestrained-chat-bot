@@ -18,6 +18,8 @@ API is backward compatible with whatsapp.js:
   GET|POST /bond         → relationship score/friction (get / owner-pin 0-3/auto)
   GET  /memory?channel&chat_id → stored facts + bond dossier
   POST /translate {text, target?} → English ↔ Naija pidgin translation
+  POST /warn {message, kind?, channel?} → self-DM alert to owner
+  POST /import {channel, chat_id, messages[]} → ingest past chats
 GET / serves the single-file chat UI (mobile-first, Termux-friendly).
 """
 from __future__ import annotations
@@ -25,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -88,6 +91,7 @@ add('Heyy 😊 pick a persona up top and talk to me — or hit 📈 to run a rea
 class _Handler(BaseHTTPRequestHandler):
     stack = None          # (cfg, router, memory, orch, companion)
     lock = threading.Lock()
+    _warn_last: dict = {}   # kind -> last ts (self-alert throttle)
     server_version = f"GodQuant/{__version__}"
 
     def log_message(self, *a):
@@ -246,6 +250,61 @@ class _Handler(BaseHTTPRequestHandler):
                         f"{goal}\n\nTEXT: {text}",
                         agent="companion").text.strip()
                 return self._json({"translation": t})
+            if path == "/warn":
+                msg = (data.get("message") or "").strip()[:500]
+                if not msg:
+                    return self._json({"error": "need {message}"}, 400)
+                kind = str(data.get("kind") or "general")
+                now = time.time()
+                if now - self._warn_last.get(kind, 0) < 300:
+                    return self._json({"queued": [], "throttled": True})
+                self._warn_last[kind] = now
+                channels = data.get("channel") or ["telegram", "whatsapp",
+                                                   "discord"]
+                if isinstance(channels, str):
+                    channels = [channels]
+                owners = {"telegram": cfg.owner_tg, "whatsapp": cfg.owner_wa,
+                          "discord": cfg.owner_discord}
+                queued = []
+                with self.lock:
+                    for ch in channels:
+                        to = owners.get(ch)
+                        if to:
+                            queued.append(self.outbox.enqueue(
+                                ch, str(to),
+                                f"\u26a0\ufe0f bot alert [{kind}]\n{msg}"))
+                return self._json({"queued": queued})
+            if path == "/import":
+                from godquant.companion.memory_engine import extract_facts
+                ch = data.get("channel", "telegram")
+                chat_id = str(data.get("chat_id", ""))
+                items = (data.get("messages") or [])[:300]
+                if not chat_id or not items:
+                    return self._json({"error": "need {chat_id, messages[]}"},
+                                      400)
+                learned, n = [], 0
+                prefix = {"telegram": "tg"}.get(ch, ch)
+                cid = f"{prefix}:{chat_id}"
+                with self.lock:
+                    for it in items:
+                        text = (it.get("text") or "").strip()
+                        if not text:
+                            continue
+                        ts = it.get("ts") or time.time()
+                        sender = str(it.get("sender") or chat_id)
+                        if it.get("role", "user") == "user":
+                            companion.bonds.note_message(ch, sender, text,
+                                                         now=float(ts))
+                            for k, v in extract_facts(text):
+                                companion.bonds.add_fact(ch, sender, k, v)
+                                learned.append(f"{k}={v}")
+                        n += 1
+                    for it in items[-60:]:  # recent slice as chat context
+                        if (it.get("text") or "").strip():
+                            companion._save_msg(
+                                cid, it.get("role", "user") or "user",
+                                it["text"][:1000])
+                return self._json({"imported": n, "facts": learned[:50]})
             if path == "/contacts":
                 ch, chat_id = data.get("channel"), data.get("chat_id")
                 if not ch or not chat_id:

@@ -20,6 +20,8 @@ from godquant.companion.mood import MoodEngine
 from godquant.companion.personas import get_persona, render_persona
 from godquant.companion.memory_engine import (clean_reply, dossier_text,
                                              extract_facts, fallback_line)
+from godquant.companion.learner import (extract_facts_llm,
+                                          style_lessons)
 from godquant.companion.relationship import (BondStore, addressing,
                                             parse_bond_id, vibe_context)
 from godquant.llm import prompts
@@ -102,13 +104,25 @@ class CompanionAgent(BaseAgent):
         try:
             text = self.router.complete(
                 "Compress this chat into durable memories: names, facts, promises, "
-                "fights, inside jokes, feelings. Terse bullet lines, no fluff.",
+                "fights, inside jokes, feelings. Terse bullet lines, no fluff. "
+                "End with a line LESSON: <one terse lesson about THEM or how to "
+                "handle them, or the word none>.",
                 chunk, agent=self.name).text.strip()
         except Exception:
             return
+        lines = [ln.strip() for ln in text.split("\n")]
+        lesson = ""
+        if lines and lines[-1].upper().startswith("LESSON:"):
+            lesson = lines[-1][7:].strip()
+            text = "\n".join(lines[:-1]).strip()
         if text:
             try:
                 self.memory.add("summary", text[:1500], tags=f"summary {cid}")
+            except Exception:
+                pass
+        if lesson and lesson.lower() != "none":
+            try:
+                self.memory.add_lesson(lesson[:300], tags=f"lesson {cid}")
             except Exception:
                 pass
 
@@ -173,9 +187,22 @@ class CompanionAgent(BaseAgent):
         rel_block = addressing(bond["level"], sender_name or bwho, is_group,
                                bond)
         vibe_block = vibe_context(message, gap)
-        for _k, _v in extract_facts(message):
+        rx = extract_facts(message)
+        if not rx and bond["substance"] >= 0.35 and not bond["spam"] \
+                and not self.cfg.offline:
+            try:  # natural phrasing ("I'm Chidi btw") — let the model read it
+                rx = extract_facts_llm(self.router, message)
+            except Exception:
+                rx = []
+        for _k, _v in rx:
             try:
                 self.bonds.add_fact(bch, bwho, _k, _v)
+            except Exception:
+                pass
+        if len(history) >= 6:  # learn texting style from every chat
+            try:
+                for _k, _v in style_lessons(history):
+                    self.bonds.add_fact(bch, bwho, _k, _v)
             except Exception:
                 pass
         dossier_block = dossier_text(self.bonds.get_facts(bch, bwho),

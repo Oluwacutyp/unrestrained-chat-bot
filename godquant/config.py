@@ -44,6 +44,9 @@ class GodQuantConfig:
     memory_db: str = ""                 # empty = ~/.godquant/memory.db
     # --- Companion (Partner fusion) ---
     persona: str = "devon"          # devon|alex|companion|realistic|quant
+    owner_tg: str = "me"            # self-chat for bot alerts (TG Saved Messages)
+    owner_wa: str = ""              # own WA chat id for alerts (see bridge log)
+    owner_discord: str = ""         # owner discord user id for DM alerts
     server_host: str = "0.0.0.0"
     server_port: int = 5000
     model_path: str = ""            # GGUF for llamacpp (empty = ~/.godquant/models/*.gguf)
@@ -84,6 +87,9 @@ _ENV_MAP = {
     "GQ_WORKSPACE": "workspace",
     "GQ_OFFLINE": "offline",
     "GQ_PERSONA": "persona",
+    "GQ_OWNER_TG": "owner_tg",
+    "GQ_OWNER_WA": "owner_wa",
+    "GQ_OWNER_DISCORD": "owner_discord",
     "GQ_PORT": "server_port",
     "GQ_MODEL_PATH": "model_path",
     "GQ_FALLBACKS": "llm_fallbacks",

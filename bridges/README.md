@@ -74,6 +74,53 @@ AI_SERVER_URL=http://localhost:5000 WA_PERSONA=alex node bridges/whatsapp.js
   `curl -X POST localhost:5000/send -d '{"channel":"whatsapp","to":"234...@c.us","message":"hey me"}'`.
   The proactive ticker + `WA_POLL` loop deliver it like any outbound text.
 
+## Discord (v3.5)
+
+```bash
+pip install -U discord.py   # enable MESSAGE CONTENT INTENT in the dev portal!
+export DISCORD_TOKEN=... DISCORD_OWNER_ID=...   # your discord user id
+python gq.py serve &
+python bridges/discord_bot.py
+```
+
+DMs always answered; guilds only on mention (`DISCORD_GUILDS` allowlist).
+Humanizer included (typing indicator, bubbles, typos). Owner cmds via DM:
+`.tick` `.send` `.contacts` `.mood` `.bond` `.memory` + `.import [limit]`
+(ingests the channel's history). Outbound queue supported (`discord` channel).
+
+## WhatsApp without Chrome — Baileys (Termux ✅, v3.5 beta)
+
+`whatsapp.js` needs Chrome (PC only). Selenium can't fix that — it needs a
+browser too. **Baileys is pure JS** (websocket, no browser), so it runs on
+Termux:
+
+```bash
+npm install @whiskeysockets/baileys qrcode-terminal axios pino
+python gq.py serve &
+AI_SERVER_URL=http://localhost:5000 WA_PAIR_NUMBER=2348012345678 node bridges/whatsapp_baileys.js
+# enter the pairing code on your phone (Linked Devices → Link with number)
+```
+
+Same brain contract as the classic bridge (humanizer, groups, outbox,
+self-alerts). Beta: keep `ALLOWED_NUMBERS` locked while testing.
+
+## Importing past chats (pre-deployment memory)
+
+Devon can know you before day one — import history, backfill bonds with real
+timestamps, extract facts:
+
+```bash
+python bridges/tg_import.py 123456789 --limit 300   # Telegram DM/group
+# or live: .import <chat> [limit]   (Telegram + Discord owner cmd)
+```
+
+## Self alerts (bot warnings → your own chat)
+
+Bridge/brain failures are queued to YOURSELF: Telegram Saved Messages
+(`GQ_OWNER_TG`, default `me`), WhatsApp self-chat (`GQ_OWNER_WA` — printed in
+the bridge log on connect), Discord owner DM (`GQ_OWNER_DISCORD`). Throttled
+to 1 per kind per 5 min, both bridge-side and server-side (`POST /warn`).
+
 ## Proactive texting (both channels)
 
 The server's ticker (every `GQ_PROACTIVE` seconds, default 300) watches every

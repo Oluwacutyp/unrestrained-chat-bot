@@ -83,6 +83,7 @@ client.on('ready', () => {
     console.log('\n💕 Your AI partner is now connected to WhatsApp');
     console.log('📱 Bot will respond to incoming messages automatically');
     console.log('🌐 Web interface still available at: http://localhost:5000');
+    try { console.log('✅ self id (set as GQ_OWNER_WA):', client.info.wid._serialized); } catch (e) {}
     console.log('\n💡 Press Ctrl+C to stop the bot\n');
 });
 
@@ -162,6 +163,19 @@ async function humanSend(chat, message, text) {
     try { await chat.clearState(); } catch (e) {}
 }
 
+// ---------- self alerts (warnings land in YOUR own chat) ----------
+const lastWarn = {};
+async function warnSelf(kind, msg) {
+    const now = Date.now();
+    if (now - (lastWarn[kind] || 0) < 300000) return;
+    lastWarn[kind] = now;
+    try {
+        await axios.post(`${AI_SERVER_URL}/warn`, {
+            channel: 'whatsapp', kind: kind, message: ('' + msg).slice(0, 400)
+        }, { timeout: 10000 });
+    } catch (e) { /* brain down — nothing to do */ }
+}
+
 // Function to call AI backend
 async function getAIResponse(message, chatId, senderName, isGroup, bondId) {
     try {
@@ -195,6 +209,7 @@ async function getAIResponse(message, chatId, senderName, isGroup, bondId) {
         }
     } catch (error) {
         console.error('❌ Error calling AI:', error.message);
+        await warnSelf('brain', 'AI backend unreachable: ' + error.message);
 
         if (error.code === 'ECONNREFUSED') {
             return "baby my brain isn't connected rn, make sure the Python server is running 😔";
@@ -300,6 +315,7 @@ client.on('message', async (message) => {
 
     } catch (error) {
         console.error('❌ Error handling message:', error.message);
+        await warnSelf('reply', 'handler crashed: ' + error.message);
 
         try {
             await message.reply("hey baby, something went wrong on my end 😔 try again?");
@@ -350,6 +366,7 @@ async function pollOutbox() {
                 console.log(`✉ sent → ${item.to}`);
             } catch (e) {
                 console.error(`send → ${item.to} failed:`, e.message);
+                await warnSelf('send', 'outbox send to ' + item.to + ' failed: ' + e.message);
                 try { await axios.post(`${AI_SERVER_URL}/ack`, { id: item.id, ok: false }); } catch (_) {}
             }
         }

@@ -106,6 +106,15 @@ class MoodEngine:
         self._save(cid, st)
         return st
 
+    def nudge(self, cid: str, mood: str, delta: int = 0) -> MoodState:
+        """Force a mood shift from outside (spam roller, bond friction...)."""
+        st = self._load(cid)
+        st.current = mood if mood in MOODS else st.current
+        st.level = min(10, max(1, st.level + delta))
+        st.last_interaction = time.time()
+        self._save(cid, st)
+        return st
+
     def update(self, cid: str, user_message: str) -> MoodState:
         st = self._load(cid)
         msg = user_message.lower()

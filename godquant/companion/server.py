@@ -15,7 +15,7 @@ API is backward compatible with whatsapp.js:
   GET  /outbox?channel=  → pending outbound for bridges (+ POST /ack {id,ok})
   GET|POST /contacts     → proactive-texting registry
   POST /tick             → run proactive pass now
-  GET|POST /bond         → relationship level (get / owner-pin 0-3)
+  GET|POST /bond         → relationship score/friction (get / owner-pin 0-3/auto)
 GET / serves the single-file chat UI (mobile-first, Termux-friendly).
 """
 from __future__ import annotations
@@ -196,12 +196,19 @@ class _Handler(BaseHTTPRequestHandler):
                 ch, chat_id = data.get("channel", "telegram"), data.get("chat_id", "")
                 if not chat_id:
                     return self._json({"error": "need {chat_id, level}"}, 400)
-                try:
-                    n = int(data.get("level"))
-                except (TypeError, ValueError):
-                    return self._json({"error": "need level 0-3"}, 400)
-                if n not in (0, 1, 2, 3):
-                    return self._json({"error": "need level 0-3"}, 400)
+                lvl = data.get("level")
+                if lvl is None or (isinstance(lvl, str) and
+                                   lvl.lower() == "auto"):
+                    n = None  # unpin → resume auto-pilot from live score
+                else:
+                    try:
+                        n = int(lvl)
+                    except (TypeError, ValueError):
+                        return self._json({"error": "need level 0-3 or auto"},
+                                          400)
+                    if n not in (0, 1, 2, 3):
+                        return self._json({"error": "need level 0-3 or auto"},
+                                          400)
                 with self.lock:
                     bond = companion.bonds.set_level(ch, str(chat_id), n)
                 return self._json({"bond": bond})

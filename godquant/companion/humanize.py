@@ -16,17 +16,30 @@ async def asleep(seconds: float):
     await asyncio.sleep(max(0.0, seconds))
 
 
-def read_delay(in_len: int, rng: random.Random | None = None) -> float:
-    """Pause AFTER receiving, BEFORE typing (reading + thinking)."""
+def read_delay(in_len: int, depth: float = 0.0,
+               rng: random.Random | None = None) -> float:
+    """Pause AFTER receiving, BEFORE typing. Heavy emotional texts (depth
+    0-1) take longer to absorb — up to +4s."""
     r = rng or random
-    return min(1.0 + in_len / 150 + r.uniform(0.5, 2.0), 7.0)
+    return min(1.0 + in_len / 150 + r.uniform(0.5, 2.0)
+               + min(4.0, max(0.0, depth) * 4.0), 9.0)
 
 
-def typing_delay(out_len: int, wpm: int = 45,
+# mood → typing-speed multiplier (excited = fast bursts, sad = slow)
+_MOOD_PACE = {"excited": 1.30, "happy": 1.15, "horny": 1.15, "needy": 1.10,
+              "annoyed": 1.20, "angry": 1.40, "stressed": 1.10,
+              "sad": 0.60, "tired": 0.55, "distant": 0.70, "jealous": 0.90}
+
+
+def typing_delay(out_len: int, wpm: int = 45, mood: str = "neutral",
+                 energy: str = "calm",
                  rng: random.Random | None = None) -> float:
-    """How long the typing indicator shows — scales with reply length."""
+    """Typing indicator, scaled to length AND performance: mood sets the pace
+    (angry = rapid-fire, sad = slow), rapid exchanges type faster."""
     r = rng or random
-    cps = max(wpm * 5 / 60, 1.0)
+    cps = max(wpm * 5 / 60, 1.0) * _MOOD_PACE.get(mood, 1.0)
+    if energy == "rapid":
+        cps *= 1.15
     return min(1.2 + out_len / cps * r.uniform(0.85, 1.25), 22.0)
 
 
@@ -115,3 +128,70 @@ class RateLimiter:
         now = _time.monotonic()
         self._hits.append(now)
         self._last[chat_id] = now
+
+
+def _corrupt(word: str, r) -> str:
+    """One human typo: doubled letter, swapped pair, or dropped letter."""
+    i = 1 + int(r.random() * (len(word) - 1))
+    k = r.random()
+    if k < 0.4:
+        return word[:i] + word[i] + word[i:]
+    if k < 0.7 and i < len(word) - 1:
+        return word[:i] + word[i + 1] + word[i] + word[i + 2:]
+    return word[:i] + word[i + 1:]
+
+
+def plan_typos(bubbles: list[str], p: float = 0.10,
+               rng: random.Random | None = None) -> list[str]:
+    """Human typo pass: rarely corrupt one lowercase word in a long bubble,
+    then append a '*correction' bubble right after. Deterministic seeded."""
+    r = rng or random
+    out = []
+    for b in bubbles:
+        out.append(b)
+        if len(b) < 60 or r.random() >= p:
+            continue
+        cands = [w for w in re.findall(r"[A-Za-z]{4,}", b) if w.islower()]
+        if not cands:
+            continue
+        w = cands[int(r.random() * len(cands))]
+        typo = _corrupt(w, r)
+        if typo == w:
+            continue
+        out[-1] = out[-1].replace(w, typo, 1)
+        out.append("*" + w)
+    return out
+
+
+class ExchangeTracker:
+    """'Got distracted' pauses: after N rapid back-and-forths in a window,
+    the bot spaces out once (40-100s) like a real person, then resets.
+    Pure logic with injectable clock — bridges call note() per inbound."""
+
+    def __init__(self, rapid_n: int = 10, rapid_window: float = 600.0,
+                 pause_lo: float = 40.0, pause_hi: float = 100.0):
+        self.rapid_n = rapid_n
+        self.rapid_window = rapid_window
+        self.pause_lo = pause_lo
+        self.pause_hi = pause_hi
+        self._hits: dict[str, deque] = {}
+
+    def gap(self, chat: str, now: float | None = None) -> float | None:
+        now = _time.monotonic() if now is None else now
+        dq = self._hits.get(chat)
+        return (now - dq[-1]) if dq else None
+
+    def note(self, chat: str, now: float | None = None,
+             rng: random.Random | None = None) -> float:
+        """Record an inbound exchange. Returns distracted-pause seconds
+        (0 = reply normally)."""
+        now = _time.monotonic() if now is None else now
+        dq = self._hits.setdefault(chat, deque())
+        dq.append(now)
+        while dq and now - dq[0] > self.rapid_window:
+            dq.popleft()
+        if len(dq) >= self.rapid_n:
+            dq.clear()
+            r = rng or random
+            return self.pause_lo + r.random() * (self.pause_hi - self.pause_lo)
+        return 0.0

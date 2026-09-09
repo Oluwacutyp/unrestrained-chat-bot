@@ -41,7 +41,8 @@ try:
 except ImportError:
     TELETHON_OK = False
 
-from godquant.companion.humanize import (RateLimiter, asleep, bubble_gap,
+from godquant.companion.humanize import (ExchangeTracker, RateLimiter,
+                                        asleep, bubble_gap, plan_typos,
                                         read_delay, split_bubbles,
                                         typing_delay)
 
@@ -62,6 +63,7 @@ HUMAN_WPM = int(os.environ.get("HUMAN_WPM", "45"))
 
 limiter = RateLimiter(max_per_min=int(os.environ.get("HUMAN_MAXPM", "20")),
                       min_chat_gap=float(os.environ.get("HUMAN_GAP", "4")))
+exchanges = ExchangeTracker()
 
 
 def _require_creds():
@@ -93,46 +95,65 @@ def allowed(sender_id: int, username: str | None) -> bool:
     return str(sender_id) in ALLOW or (username or "").lower() in ALLOW
 
 
-async def chat_reply(text: str, sender_id: int, display: str,
-                     use_search: bool = False, chat_id=None,
-                     is_group: bool = False) -> str:
-    """Ask the brain. Group chats share one context; bonds stay per-sender."""
+async def chat_full(text: str, sender_id: int, display: str,
+                   use_search: bool = False, chat_id=None,
+                   is_group: bool = False) -> dict:
+    """Ask the brain. Group chats share one context; bonds stay per-sender.
+
+    Returns the full /chat payload (response + mood + bond intelligence)
+    so the humanizer can perform it properly.
+    """
     chat = str(chat_id) if chat_id is not None else str(sender_id)
-    data = await api("/chat", {
+    return await api("/chat", {
         "message": text, "conversation_id": f"tg:{chat}",
         "channel": "telegram", "chat_id": chat, "display": display,
         "sender_name": display, "is_group": is_group,
         "bond_id": f"telegram:{sender_id}",
         "persona": PERSONA or None, "use_search": use_search}, timeout=180)
+
+
+async def chat_reply(text: str, sender_id: int, display: str,
+                     use_search: bool = False, chat_id=None,
+                     is_group: bool = False) -> str:
+    """Ask the brain, text only (compat wrapper around chat_full)."""
+    data = await chat_full(text, sender_id, display, use_search, chat_id,
+                           is_group)
     # NOTE: mood footer deliberately NOT appended — replies stay clean.
     return data.get("response") or "(no reply 😅)"
 
 
-async def human_send_reply(event, client, text: str):
-    """Reply like a human: read pause → typing scaled to length → bubbles."""
-    bubbles = split_bubbles(text)
+async def human_send_reply(event, client, text: str, mood: str = "neutral",
+                           depth: float = 0.0, energy: str = "calm"):
+    """Reply like a human: read pause → mood-paced typing → bubbles.
+
+    mood/depth/energy come from the brain's reply payload: heavy emotional
+    texts get longer absorbsion, angry types fast, sad types slow, and long
+    bubbles occasionally ship a human typo + *correction.
+    """
+    bubbles = plan_typos(split_bubbles(text))
     chat = "tg:%s" % getattr(event, "chat_id", "?")
     if not HUMANIZE:
         for b in bubbles:
             await limiter.wait(chat)
             await event.reply(b[:4000])
         return
-    await asleep(read_delay(len(text)))
+    await asleep(read_delay(len(text), depth))
     for i, b in enumerate(bubbles):
         if i:
             await asleep(bubble_gap())
         await limiter.wait(chat)
         try:
             async with client.action(event.chat_id, "typing"):
-                await asleep(typing_delay(len(b), wpm=HUMAN_WPM))
+                await asleep(typing_delay(len(b), wpm=HUMAN_WPM, mood=mood,
+                                          energy=energy))
         except Exception:
             await asleep(typing_delay(b))
         await event.reply(b[:4000])
 
 
-async def human_send_message(client, entity, text: str):
+async def human_send_message(client, entity, text: str, mood: str = "neutral"):
     """Outbound variant of human_send_reply (no event to reply to)."""
-    bubbles = split_bubbles(text)
+    bubbles = plan_typos(split_bubbles(text))
     key = "tg:%s" % entity
     if not HUMANIZE:
         for b in bubbles:
@@ -146,7 +167,7 @@ async def human_send_message(client, entity, text: str):
         await limiter.wait(key)
         try:
             async with client.action(entity, "typing"):
-                await asleep(typing_delay(len(b), wpm=HUMAN_WPM))
+                await asleep(typing_delay(len(b), wpm=HUMAN_WPM, mood=mood))
         except Exception:
             await asleep(typing_delay(b))
         await client.send_message(entity, b[:4000])
@@ -282,9 +303,19 @@ async def handle_incoming(event, client, me) -> str | None:
             if out:
                 await event.reply(out[:4000])
                 return out
-        reply = await chat_reply(text, sid, name, use_search=SEARCH,
-                                 chat_id=event.chat_id, is_group=is_group)
-        await human_send_reply(event, client, reply)
+        full = await chat_full(text, sid, name, use_search=SEARCH,
+                               chat_id=event.chat_id, is_group=is_group)
+        reply = full.get("response") or "(no reply 😅)"
+        chat_key = "tg:%s" % event.chat_id
+        energy = "rapid" if (exchanges.gap(chat_key) or 1e9) < 90 else "calm"
+        spaced = exchanges.note(chat_key)
+        if spaced:
+            print(f"💤 distracted {spaced:.0f}s ({chat_key})")
+            await asleep(spaced)
+        await human_send_reply(event, client, reply,
+                               mood=full.get("mood", "neutral"),
+                               depth=float(full.get("substance", 0) or 0),
+                               energy=energy)
         print("✓ replied")
         return reply
     except Exception as e:

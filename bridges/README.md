@@ -34,9 +34,15 @@ python bridges/telegram_userbot.py               # first run: phone number + log
   `.mission <goal>` · `.tick` (force proactive pass) · `.send <chat|me> <msg>`
   · `.contacts` · `.mood` · `.reset` · `.persona alex`
   · `.bond [chat] [0-3]` (view/pin relationship level) · `.help`
-- **Humanizer** (v3.2): read pauses, typing scaled to reply length,
-  multi-bubble splits, anti-ban pacing. Tune: `HUMAN_WPM=45`
-  `HUMAN_MAXPM=20` `HUMAN_GAP=4`; `TG_HUMANIZE=0` for instant sends.
+- **Humanizer** (v3.3): read pauses (+depth for heavy texts), mood-paced
+  typing (angry = fast, sad = slow), multi-bubble splits, rare human typos
+  with `*corrections`, "got distracted" pauses in long rapid sessions, and
+  anti-ban pacing. Tune: `HUMAN_WPM=45` `HUMAN_MAXPM=20` `HUMAN_GAP=4`;
+  `TG_HUMANIZE=0` for instant sends.
+- **Bonds** (v3.3): closeness is a 0-100 score from substance × warmth —
+  spam earns ~nothing, insults build friction (bot goes cold), silence
+  decays, day-streaks deepen. `.bond <chat>` shows score/friction/streak;
+  `.bond <chat> auto` resumes auto-pilot after a pin.
 - **DM commands** (contacts): `!reset` `!mood` `!search <q>` `!news <q>` `!wiki <q>` `!fact <q>`
 - **Text itself**: `.send me good morning ❤` lands in your Saved Messages.
   The proactive ticker texts silent contacts automatically (see below).

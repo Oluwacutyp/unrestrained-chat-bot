@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import json
 import re
+import time
 
 from godquant.agents.base import AgentResult, AgentTask, BaseAgent
 from godquant.companion import web_search as WS
 from godquant.companion.mood import MoodEngine
 from godquant.companion.personas import get_persona, render_persona
-from godquant.companion.relationship import BondStore, addressing, parse_bond_id
+from godquant.companion.relationship import (BondStore, addressing,
+                                            parse_bond_id, vibe_context)
 from godquant.llm import prompts
 from godquant.quant import risk as R
 from godquant.quant.backtest import run_backtest
@@ -119,8 +121,16 @@ class CompanionAgent(BaseAgent):
 
         # relationship: closeness gates pet names (never "babe" for strangers)
         bch, bwho = parse_bond_id(bond_id or cid)
+        prev = self.bonds.get(bch, bwho)
+        gap = (time.time() - prev["last_ts"]) if prev["last_ts"] else None
         bond = self.bonds.note_message(bch, bwho, message)
-        rel_block = addressing(bond["level"], sender_name or bwho, is_group)
+        if bond["spam"] and bond["friction"] >= 30 and \
+                mood_state.current in ("neutral", "happy", "needy"):
+            mood_state = self.moods.nudge(cid, "annoyed", +1)
+            mood_ctx = self.moods.context(cid)
+        rel_block = addressing(bond["level"], sender_name or bwho, is_group,
+                               bond)
+        vibe_block = vibe_context(message, gap)
 
         tool_ctx = self._maybe_tools(message)
         if use_search and "[TOOL:WEB]" not in tool_ctx:
@@ -137,6 +147,8 @@ class CompanionAgent(BaseAgent):
         except Exception:
             pass
         system += "\n" + rel_block
+        if vibe_block:
+            system += "\n" + vibe_block
         convo = "\n".join(f"{'Them' if m['role'] == 'user' else 'You'}: {m['content'][:500]}"
                           for m in history[-8:])
         mood_tag = f"\n[MOOD: {mood_state.current} {mood_state.level}/10]"
@@ -154,7 +166,12 @@ class CompanionAgent(BaseAgent):
                 "persona": persona,
                 "sampling": sampling,
                 "bond": bond["level"],
-                "bond_count": bond["count"]}
+                "bond_count": bond["count"],
+                "bond_score": bond["score"],
+                "friction": bond["friction"],
+                "streak": bond["streak"],
+                "substance": bond["substance"],
+                "warmth": bond["warmth"]}
 
     def proactive_opener(self, cid: str, persona: str | None = None,
                          silence_s: int = 3600, display: str | None = None) -> str:
@@ -166,7 +183,7 @@ class CompanionAgent(BaseAgent):
         summary = self.history_summary(history)
         bch, bwho = parse_bond_id(cid)
         bond = self.bonds.get(bch, bwho)
-        rel_block = addressing(bond["level"], display or bwho, False)
+        rel_block = addressing(bond["level"], display or bwho, False, bond)
         system = render_persona(persona, mood_context=mood_ctx,
                                 history_summary=summary)
         system += "\n" + rel_block

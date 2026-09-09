@@ -51,11 +51,14 @@ One brain, two bridges — both **reply and deliver**, so the bot texts first:
 | `bridges/whatsapp.js` (Node, QR login) | ✅ DMs + groups | ✅ via outbox poll | **PC** (needs Chrome) |
 | `bridges/telegram_userbot.py` (MTProto, **your own account**) | ✅ DMs + groups | ✅ via outbox poll | **Termux ✅** |
 
-v3.2 humanizer: replies are **clean** (no mood footer), with read pauses,
-typing scaled to reply length, multi-bubble splits, earned relationships
-(no "babe" for strangers — `.bond <chat>` to view/pin), mention-gated group
-replies (`TG_GROUPS=1` / `WA_GROUP_OPEN=1`), and anti-ban pacing
+v3.3 social brain: replies are **clean** (no mood footer), with read pauses,
+mood-paced typing, multi-bubble splits, rare typos + `*corrections`, and
+distracted pauses. Relationships are a **0-100 score** from substance ×
+warmth — spam earns ~nothing, insults build friction, silence decays,
+streaks deepen (`.bond <chat>` to view/pin). Mention-gated group replies
+(`TG_GROUPS=1` / `WA_GROUP_OPEN=1`) and anti-ban pacing
 (`HUMAN_MAXPM`/`HUMAN_GAP`, `TG_HUMANIZE=0` for instant sends).
+Update a live bot with `bash update.sh`.
 
 ```bash
 # Terminal 1 — the brain (with proactive ticker every 5 min)

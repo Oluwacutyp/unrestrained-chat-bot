@@ -123,16 +123,17 @@ def test_dm_gets_brain_reply(monkeypatch):
     mod = _load_bridge()
     mod.ALLOW.clear()
 
-    async def fake_chat(text, sid, display, use_search=False,
-                        chat_id=None, is_group=False):
+    async def fake_chat_full(text, sid, display, use_search=False,
+                             chat_id=None, is_group=False):
         assert sid == 42 and "hey" in text
         assert chat_id == sid and is_group is False  # DM: context == sender
-        return "heeey babe!! 😍"
+        return {"response": "heeey babe!! 😍", "mood": "happy",
+                "substance": 0.5}
 
     async def fake_api(path, payload=None, timeout=120):
         assert path == "/contacts"  # registration sighting
         return {}
-    monkeypatch.setattr(mod, "chat_reply", fake_chat)
+    monkeypatch.setattr(mod, "chat_full", fake_chat_full)
     monkeypatch.setattr(mod, "api", fake_api)
 
     ev = FakeEvent("hey babe", FakeSender(42, "babe"))
@@ -182,8 +183,8 @@ def test_group_mention_replies_when_enabled(monkeypatch):
     async def fake_group_chat(t, s, d, use_search=False,
                               chat_id=None, is_group=False):
         assert chat_id == -100 and is_group is True  # group: shared context
-        return "yo 👀"
-    monkeypatch.setattr(mod, "chat_reply", fake_group_chat)
+        return {"response": "yo 👀", "mood": "neutral", "substance": 0.1}
+    monkeypatch.setattr(mod, "chat_full", fake_group_chat)
 
     async def fake_api(path, payload=None, timeout=120):
         return {}
@@ -237,8 +238,10 @@ def test_catchup_replies_to_fresh_unread_only(monkeypatch):
     monkeypatch.setenv("TG_CATCHUP", "1")
     monkeypatch.setenv("TG_CATCHUP_MINS", "60")
     monkeypatch.setenv("TG_CATCHUP_MAX", "5")
-    monkeypatch.setattr(mod, "chat_reply",
-                        lambda t, s, d, **kw: asyncio.sleep(0, "back! ❤"))
+    monkeypatch.setattr(mod, "chat_full",
+                        lambda t, s, d, **kw: asyncio.sleep(
+                            0, {"response": "back! ❤", "mood": "happy",
+                                "substance": 0.2}))
 
     async def fake_api(path, payload=None, timeout=120):
         return {}

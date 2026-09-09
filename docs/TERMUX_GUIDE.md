@@ -197,6 +197,21 @@ Open `http://127.0.0.1:5000` in your phone browser for the chat UI.
 | Bot replies as you in groups | `TG_GROUPS=1` enables mention-only group replies (v3.2); default ignores groups |
 | `PLAY STORE Termux` errors | reinstall from F-Droid — Play build is dead |
 
+## 8.5 Updating while the bot is running
+
+New version out? One command stops everything, pulls, and restarts:
+
+```bash
+cd ~/unrestrained-chat-bot
+bash update.sh
+```
+
+Your Telegram login (`.session`), memory DB, and bond scores all survive —
+they live outside git. If a process was started in another Termux session,
+`update.sh` still finds and restarts it (logs: `brain.log`, `userbot.log`).
+Manual way: `pkill -f "bot.py serve"; pkill -f telegram_userbot`, then
+`git pull` and re-run both commands.
+
 ## 9. Security notes (read once)
 
 - `~/.godquant/env.sh` + `tg_userbot.session` = your keys + your Telegram login.

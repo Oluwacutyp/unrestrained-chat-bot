@@ -145,6 +145,9 @@ server. WhatsApp: `WA_OWNER_NUMBER` + `.cmd` in any chat incl. self-chat.
 | `.train status\|export\|push\|script` · `.good` · `.bad` | personal-model data collection + HF pipe (v4.2) |
 | `.model load <user/model\|path.gguf> [provider]` · `.model list` | load personal models at runtime, persisted (v4.4) |
 | `python bridges/tg_history.py --list` · `--all [--limit N]` | harvest every TG chat/group/channel into training data (v4.5, stop userbot first) |
+| `python bridges/reddit_bridge.py [--backfill N]` | full Reddit bridge: mentions, replies, DMs, outbox (v4.6, needs script app) |
+| `python bridges/x_bridge.py [--post ..]` | X bridge: mentions + replies + outbox (v4.6, mentions need Basic tier+) |
+| `python bridges/discord_history.py --all` · `.research <q>` | discord harvest + universal research: youtube/tiktok/all links (v4.6) |
 | `.cal …` · `.spend …` · `.ledger` · `.health …` · `.healthlog` · `.bible …` | calendar + ledger + health + world bibles (v4.3) |
 
 Contacts get: `!reset` `!mood` `!search` `!news` `!wiki` `!fact` `!translate`.

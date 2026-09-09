@@ -84,6 +84,7 @@ async function main() {
         if (path === '/bible' && (payload.action === 'save' || payload.action === 'new')) return { ok: true };
         if (path === '/bible' && payload.action === 'get') return payload.name === 'midgard' ? { body: 'CANON' } : { error: 'x' };
         if (path === '/bible') return { bibles: ['midgard'] };
+        if (path === '/research') return payload.query ? { brief: 'BRIEF-BODY' } : { error: 'x' };
         if (path === '/pref') return payload.cid === 'whatsapp:nobody' ? { error: 'x' } : { logged: payload.verdict };
         if (path === '/train/status') return { trajectories: 10, prefs: 2, pairs: 1, bytes: 99 };
         if (path === '/train/export') return { sft: 9, dpo: 1, skipped: 1, dir: '/w/train' };
@@ -178,6 +179,8 @@ async function main() {
     has(await run('.bible save midgard CANON'), 'appended', 'bible save');
     has(await run('.bible midgard'), 'CANON', 'bible get');
     has(await run('.bible list'), 'midgard', 'bible list');
+    has(await run('.research lagos weather'), 'BRIEF', 'research');
+    has(await run('.research'), 'usage', 'research usage');
     console.log(`wa_owner.js OK (${n} asserts)`);
 }
 

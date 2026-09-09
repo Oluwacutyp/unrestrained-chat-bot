@@ -4,7 +4,7 @@ Termux-first: zero mandatory pip dependencies (stdlib only).
 Optional accelerators: requests, numpy, yfinance, rich.
 """
 
-__version__ = "4.5.0"
+__version__ = "4.6.0"
 __author__ = "oluwacutyp / peacethefirst1"
 __author__ = "God Quant AI"
 

@@ -58,6 +58,13 @@ fits the same API; SqliteVectorIndex/Chroma later).
   channel→Alpaca style rows, dedupe, per-chat resume state);
   `TrajectoryLogger.log_history` lands rows in `trajectories.jsonl` so
   export/push/Colab work unchanged. No ratings needed.
+- **v4.6 social + research ✅ shipped:** `reddit_bridge.py` (PRAW inbox +
+  outbox u/user|t1_|t3_ + `--backfill`), `x_bridge.py` (tweepy mentions +
+  outbox, tier-honest), `discord_history.py` (guild harvest, resume
+  state); `tools/research.py` (oEmbed/yt-transcript/article extract,
+  DDG `research()` briefs) behind upgraded `web_fetch` + new
+  `deep_research` tool + `/research` route + `.research` on both cores;
+  `scripts/codegen_megabuild.py` + `codegen` tool, added to CoderAgent.
 
 ## Reliability bar (every phase)
 

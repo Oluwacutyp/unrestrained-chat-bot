@@ -51,6 +51,12 @@ One brain, two bridges — both **reply and deliver**, so the bot texts first:
 | `bridges/whatsapp.js` (Node, QR login) | ✅ DMs + groups | ✅ via outbox poll | **PC** (needs Chrome) |
 | `bridges/telegram_userbot.py` (MTProto, **your own account**) | ✅ DMs + groups | ✅ via outbox poll | **Termux ✅** |
 
+v4.6 social + research: **full Reddit bridge** (mentions, replies,
+DMs, outbox, `--backfill` your history), **full X bridge** (mentions +
+replies + outbox posts, honest tier limits), **Discord history harvest**,
+**universal research** (`.research <q>` — YouTube transcripts, TikTok/X/
+Reddit oEmbed, article text, DDG search briefs), and **codegen megabuild**
+(`scripts/codegen_megabuild.py` + `codegen` tool in the coder agent's kit).
 v4.5 history harvest: **backfill training data from every Telegram
 chat** (`python bridges/tg_history.py --list` then `--all` — DMs, groups,
 channels, resumable per chat, no `.good`/`.bad` needed) straight into the

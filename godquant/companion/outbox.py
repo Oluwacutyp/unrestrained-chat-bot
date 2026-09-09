@@ -12,6 +12,7 @@ This is what lets the bot TEXT FIRST — not just reply:
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 import threading
 import time
@@ -166,6 +167,28 @@ def _in_quiet(quiet: str, now: datetime | None = None) -> bool:
     return h >= start or h < end if start > end else start <= h < end
 
 
+_WEAVE_STOP = frozenset({
+    "call", "text", "ask", "tell", "remind", "remember", "buy", "get", "do",
+    "the", "and", "for", "with", "that", "this", "from", "about", "you",
+})
+
+
+def _wtokens(s: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", (s or "").lower())
+            if len(w) > 2 and w not in _WEAVE_STOP}
+
+
+def weave_score(reminder_text: str, display: str, facts) -> int:
+    """Meaningful tokens shared between a reminder and a chat's identity."""
+    rt = _wtokens(reminder_text)
+    if not rt:
+        return 0
+    who = _wtokens(display)
+    for _k, v in facts or []:
+        who |= _wtokens(v)
+    return len(rt & who)
+
+
 class ProactiveEngine:
     """Silence watcher: text contacts first, in character."""
 
@@ -205,8 +228,35 @@ class ProactiveEngine:
             return False
         return True
 
+    def _weave_target(self, reminder: dict, now: float):
+        """(channel, chat_id, display) of a live relevant DM chat, else None."""
+        try:
+            contacts = self.outbox.list_contacts()
+        except Exception:
+            return None
+        window = self.cfg.remind_window or 900
+        best, best_score = None, 0
+        for c in contacts:
+            if not c["enabled"] or self._is_group(c["channel"], c["chat_id"]):
+                continue
+            ago = c["last_inbound_ago"]
+            if ago < 0 or ago > window:
+                continue
+            try:
+                facts = self.companion.bonds.get_facts(c["channel"],
+                                                       c["chat_id"])
+            except Exception:
+                facts = []
+            sc = weave_score(reminder["text"], c["display"], facts)
+            if sc > best_score:
+                best = (c["channel"], c["chat_id"],
+                        c["display"] or c["chat_id"])
+                best_score = sc
+        return best
+
     def _tick_reminders(self, now: float) -> list[dict]:
-        """Fire due reminders into the outbox (alarms bypass quiet hours)."""
+        """Fire due reminders: weave into a live relevant chat when there is
+        one, else drop the ⏰ alarm in the home chat (bypasses quiet hours)."""
         try:
             due = self.companion.bonds.due_reminders(now)
         except Exception as e:
@@ -215,12 +265,39 @@ class ProactiveEngine:
         queued = []
         for r in due:
             try:
-                mid = self.outbox.enqueue(r["channel"], r["chat_id"],
-                                          f"⏰ {r['text']}")
+                target = self._weave_target(r, now) \
+                    if self.cfg.remind_weave else None
+                if target:
+                    ch, cid, disp = target
+                    try:
+                        out = self.companion.chat(
+                            f"[EVENT: your reminder '{r['text']}' just fired "
+                            f"while you're chatting with {disp}. Weave it into "
+                            f"the conversation naturally in ONE short message. "
+                            f"No alarm emoji, no mention of reminders.]",
+                            f"{ch}:{cid}", persona=self.cfg.persona,
+                            bond_id=f"{ch}:{cid}")
+                        text = (out.get("response") or "").strip() or r["text"]
+                    except Exception:
+                        text = r["text"]
+                    mid = self.outbox.enqueue(ch, cid, text)
+                    queued.append({"id": mid, "channel": ch, "to": cid,
+                                   "message": text[:120]})
+                    log.info("reminder #%d woven into %s:%s", r["id"], ch, cid)
+                    if (ch, cid) != (r["channel"], r["chat_id"]):
+                        rm = self.outbox.enqueue(
+                            r["channel"], r["chat_id"],
+                            f"✅ handled in {disp}'s chat: {r['text'][:150]}")
+                        queued.append({"id": rm, "channel": r["channel"],
+                                       "to": r["chat_id"],
+                                       "message": f"✅ handled in {disp}"})
+                else:
+                    mid = self.outbox.enqueue(r["channel"], r["chat_id"],
+                                              f"⏰ {r['text']}")
+                    queued.append({"id": mid, "channel": r["channel"],
+                                   "to": r["chat_id"],
+                                   "message": f"⏰ {r['text'][:120]}"})
                 self.companion.bonds.fire_reminder(r["id"], now)
-                queued.append({"id": mid, "channel": r["channel"],
-                               "to": r["chat_id"],
-                               "message": f"⏰ {r['text'][:120]}"})
             except Exception as e:
                 log.warning("reminder #%d failed: %s", r["id"], e)
         return queued

@@ -237,6 +237,18 @@ to change who's talking where, `.models`/`.model groq` to switch brains,
 audited code, `.exec` for raw shell (**only with `GQ_ALLOW_EXEC=1`** — anyone
 holding your unlocked phone could run commands, so think before enabling).
 
+## 8.8 Alarms that find you (v3.8)
+
+1. Open your self-chat: Telegram **Saved Messages**, WhatsApp chat with
+   yourself, or the bot's DM on Discord.
+2. Type `.remind in 2h call mom` (or `tomorrow 7:00`, `every day 8:00`,
+   plain `19:30`). She confirms with `⏰ #1 ...`.
+3. When it fires you get `⏰ call mom` right there — **unless** you're
+   mid-conversation in a chat it relates to (you're chatting with Mom):
+   then she weaves it into that chat naturally in her own voice, and your
+   self-chat gets `✅ handled in Mom's chat` instead. Groups are never
+   touched. `.snooze 1 in 30m` buys time; `.reminders` lists all.
+
 ## 9. Security notes (read once)
 
 - `~/.godquant/env.sh` + `tg_userbot.session` = your keys + your Telegram login.

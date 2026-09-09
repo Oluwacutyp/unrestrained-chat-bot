@@ -135,7 +135,7 @@ server. WhatsApp: `WA_OWNER_NUMBER` + `.cmd` in any chat incl. self-chat.
 | `.mission <goal>` · `.code <task>` | multi-agent tasks · audited code → `workspace/code/` |
 | `.exec <shell>` | ⚠️ raw shell (needs `GQ_ALLOW_EXEC=1` + restart) |
 | `.tick` `.send` `.contacts` `.mood` `.reset` `.stats` `.import` `.help` | ops classics |
-| `.remind <when> <text>` · `.reminders` · `.cancel <id>` | alarms (`in 30m`, `tomorrow 7:00`, `every day 8:00`, `19:30`); bypass quiet hours |
+| `.remind <when> <text>` · `.reminders` · `.cancel <id>` · `.snooze <id> <when>` | alarms (`in 30m`, `tomorrow 7:00`, `every day 8:00`, `19:30`); bypass quiet hours; smart-weave into live relevant chats (v3.8, `GQ_REMIND_WEAVE=0` to disable, `GQ_REMIND_WINDOW` secs) |
 | `.want <goal>` · `.mind [done\|drop <id>]` | intentions — hers and yours, in one view |
 | `.journal [chat]` · `.dream` · `.brief` | relationship diary · consolidate now · morning briefing |
 | `.note save <n> <text>` · `.note <n>` · `.note list` | long-term notes (case-insensitive names) |

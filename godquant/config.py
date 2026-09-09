@@ -50,6 +50,8 @@ class GodQuantConfig:
     allow_exec: bool = False         # ⚠️ owner .exec shell commands (chat RCE)
     brief_to: str = ""               # "channel:chat_id" for auto morning brief
     brief_hour: int = 7              # earliest hour the brief may fire
+    remind_weave: bool = True        # weave alarms into live relevant chats
+    remind_window: int = 900         # "live chat" = inbound within N sec
     server_host: str = "0.0.0.0"
     server_port: int = 5000
     model_path: str = ""            # GGUF for llamacpp (empty = ~/.godquant/models/*.gguf)
@@ -96,6 +98,8 @@ _ENV_MAP = {
     "GQ_ALLOW_EXEC": "allow_exec",
     "GQ_BRIEF_TO": "brief_to",
     "GQ_BRIEF_HOUR": "brief_hour",
+    "GQ_REMIND_WEAVE": "remind_weave",
+    "GQ_REMIND_WINDOW": "remind_window",
     "GQ_PORT": "server_port",
     "GQ_MODEL_PATH": "model_path",
     "GQ_FALLBACKS": "llm_fallbacks",
@@ -111,10 +115,11 @@ _ENV_MAP = {
 
 
 def _coerce(field_name: str, value: str):
-    bools = {"offline", "auto_apply_patches"}
+    bools = {"offline", "auto_apply_patches", "allow_exec", "remind_weave"}
     ints = {"llm_max_tokens", "llm_timeout", "max_workers", "max_iterations",
             "server_port", "llamacpp_threads", "llamacpp_ctx",
-            "proactive_interval", "nudge_after", "nudge_gap", "max_nudges"}
+            "proactive_interval", "nudge_after", "nudge_gap", "max_nudges",
+            "brief_hour", "remind_window"}
     floats = {"llm_temperature", "initial_cash", "commission", "slippage",
               "max_risk_per_trade", "max_risk_per_trade"}
     if field_name in bools:

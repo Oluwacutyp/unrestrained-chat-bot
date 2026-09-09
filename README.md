@@ -51,6 +51,10 @@ One brain, two bridges — both **reply and deliver**, so the bot texts first:
 | `bridges/whatsapp.js` (Node, QR login) | ✅ DMs + groups | ✅ via outbox poll | **PC** (needs Chrome) |
 | `bridges/telegram_userbot.py` (MTProto, **your own account**) | ✅ DMs + groups | ✅ via outbox poll | **Termux ✅** |
 
+v3.8 smart alarms: reminders **weave into live relevant chats** ("call mom"
+fires while you're chatting with Mom → she works it into the conversation
+naturally, plus a ✅ receipt in your self-chat), `.snooze`, and env-coercion
+fixes. Falls back to the ⏰ self-chat alarm when nothing relevant is live.
 v3.7 autonomous mind: **reminders that fire** (`.remind in 2h call mom`,
 repeating, survive restarts), a nightly **dream cycle** (memory
 conflict-repair, per-relationship journaling, self-set check-in intentions),

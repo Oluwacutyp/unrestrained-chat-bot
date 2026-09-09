@@ -565,6 +565,14 @@ class BondStore:
                      "text": r[3], "repeat": r[4], "due_ts": r[5],
                      "done": bool(r[6])} for r in cur.fetchall()]
 
+    def snooze_reminder(self, rid: int, due_ts: float) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE reminders SET due_ts=?, done=0 WHERE id=?",
+                (due_ts, rid))
+            self._conn.commit()
+            return cur.rowcount > 0
+
     def cancel_reminder(self, rid: int) -> bool:
         with self._lock:
             cur = self._conn.execute(

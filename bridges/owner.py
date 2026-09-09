@@ -16,12 +16,12 @@ HELP = {
                  "`.send <chat> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                  "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                  "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.help`"),
+                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.help`"),
     "discord": ("discord cmds: `.mission <goal>` `.code <task>` `.exec <shell>` `.tick` "
                 "`.send <id> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                 "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                 "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.help`"),
+                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.help`"),
 }
 
 
@@ -154,6 +154,17 @@ async def run_owner_command(api, channel: str, cmd: str, arg: str,
         r = await api("/remind", {"action": "cancel",
                                   "id": int(arg.strip())})
         return "cancelled ✅" if r.get("cancelled") else "no such reminder"
+    if cmd == "snooze":
+        rid, _, when = arg.partition(" ")
+        due = parse_when(when.strip()) if rid.strip().isdigit() else None
+        if not due:
+            return "usage: .snooze <reminder id> <in 30m|2h · tomorrow 7:00 · 19:30>"
+        r = await api("/remind", {"action": "snooze", "id": int(rid),
+                                  "due_ts": due[0]})
+        if not r.get("snoozed"):
+            return "no such reminder"
+        return ("⏰ snoozed → " +
+                datetime.fromtimestamp(due[0]).strftime("%m-%d %H:%M"))
     if cmd == "want":
         if not arg.strip():
             return "usage: .want <goal — she plans around it>"

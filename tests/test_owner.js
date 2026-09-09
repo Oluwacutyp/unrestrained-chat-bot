@@ -55,6 +55,7 @@ async function main() {
         if (path === '/import') return { imported: 50, facts: ['name=Mary'] };
         if (path === '/status') return { version: '3.6.0', status: 'online', memories: { chat: 5 }, llm_calls: 9, spend_usd: 0, persona: 'devon' };
         if (path === '/remind' && payload && payload.action === 'add') return { id: 5 };
+        if (path === '/remind' && payload && payload.action === 'snooze') return { snoozed: payload.id === 5 };
         if (path === '/remind') return payload && payload.action === 'cancel'
             ? { cancelled: payload.id === 5 }
             : { reminders: [{ id: 5, channel: 'whatsapp', chat_id: '1@c.us', text: 'call mom', repeat: '', due_ts: 2000000000 }] };
@@ -124,6 +125,9 @@ async function main() {
     has(await run('.brief'), 'brief', 'brief');
     has(await run('.fetch https://x'), 'hello', 'fetch');
     has(await run('.fetch'), 'usage', 'fetch usage');
+    has(await run('.snooze 5 in 2h'), 'snoozed', 'snooze');
+    has(await run('.snooze x'), 'usage', 'snooze usage');
+    has(await run('.snooze 9 in 2h'), 'no such', 'snooze missing');
     console.log(`wa_owner.js OK (${n} asserts)`);
 }
 

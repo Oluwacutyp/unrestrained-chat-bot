@@ -17,6 +17,7 @@ const HELP = 'wa cmds: `.mission <goal>` `.code <task>` `.exec <shell>` `.tick` 
     '`.forget <chat> [deep]` `.models` `.model <name>` `.stats` `.import [limit]` ' +
     '`.remind <when> <text>` `.reminders` `.cancel <id>` `.want <goal>` ' +
     '`.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` ' +
+    '`.snooze <id> <when>` ' +
     '`.dream` `.brief` `.fetch <url>` `.help`';
 
 function parseOwnerCommand(text) {
@@ -187,6 +188,14 @@ async function handleOwnerCommand(text, ctx) {
         if (!/^\d+$/.test(arg)) return 'usage: .cancel <reminder id>';
         const r = await post('/remind', { action: 'cancel', id: parseInt(arg, 10) });
         return r.cancelled ? 'cancelled ✅' : 'no such reminder';
+    }
+    if (cmd === 'snooze') {
+        const sp = arg.indexOf(' ');
+        const w = sp > 0 && /^\d+$/.test(arg.slice(0, sp)) ? parseWhen(arg.slice(sp + 1)) : null;
+        if (!w) return 'usage: .snooze <reminder id> <in 30m|2h · tomorrow 7:00 · 19:30>';
+        const r = await post('/remind', { action: 'snooze', id: parseInt(arg.slice(0, sp), 10), due_ts: w.due });
+        if (!r.snoozed) return 'no such reminder';
+        return '⏰ snoozed → ' + fmtDue(w.due);
     }
     if (cmd === 'want') {
         if (!arg) return 'usage: .want <goal — she plans around it>';

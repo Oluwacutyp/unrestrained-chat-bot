@@ -421,6 +421,11 @@ class _Handler(BaseHTTPRequestHandler):
                     with self.lock:
                         ok = b.cancel_reminder(int(data.get("id", 0)))
                     return self._json({"cancelled": ok})
+                if act == "snooze":
+                    with self.lock:
+                        ok = b.snooze_reminder(int(data.get("id", 0)),
+                                               float(data.get("due_ts", 0)))
+                    return self._json({"snoozed": ok})
                 return self._json({"error": "action: add|list|cancel"}, 400)
             if path == "/want":
                 if not (data.get("text") or "").strip():

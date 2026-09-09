@@ -18,7 +18,8 @@ const HELP = 'wa cmds: `.mission <goal>` `.code <task>` `.exec <shell>` `.tick` 
     '`.remind <when> <text>` `.reminders` `.cancel <id>` `.want <goal>` ' +
     '`.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` ' +
     '`.snooze <id> <when>` ' +
-    '`.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.help`';
+    '`.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` ' +
+    '`.project <goal>` `.projects` `.resume <id>` `.help`';
 
 function parseOwnerCommand(text) {
     const t = (text || '').trim();
@@ -263,6 +264,22 @@ async function handleOwnerCommand(text, ctx) {
             return r.ok ? 'edited ✅' : 'no such memory';
         }
         return 'usage: .mem list [scope] | pin|unpin|del <id> | edit <id> <text>';
+    }
+    if (cmd === 'project') {
+        if (!arg) return 'usage: .project <goal> — runs in background, reports here';
+        const r = await post('/missions', { action: 'create', goal: arg, report_to: channel + ':' + (ctx.chatId || 'me') });
+        return r.started ? 'project started 🚀 (progress lands here)' : 'project failed: ' + r.error;
+    }
+    if (cmd === 'projects') {
+        const r = await post('/missions', { action: 'list' });
+        const ms = r.missions || [];
+        if (!ms.length) return 'no projects yet 🚧';
+        return ms.map(m => `#${m.id} [${m.status}] ${m.goal.slice(0, 100)}`).join('\n').slice(0, 3000);
+    }
+    if (cmd === 'resume') {
+        if (!/^\d+$/.test(arg)) return 'usage: .resume <project id>';
+        const r = await post('/missions', { action: 'resume', id: parseInt(arg, 10) });
+        return r.started ? 'resumed 🚀' : 'resume failed: ' + r.error;
     }
     if (cmd === 'fetch') {
         if (!arg) return 'usage: .fetch <url>';

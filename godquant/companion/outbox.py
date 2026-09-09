@@ -339,6 +339,43 @@ class ProactiveEngine:
         except Exception as e:
             log.warning("brief failed: %s", e)
 
+    def _tick_missions(self) -> list[dict]:
+        from godquant.agents.missions import MissionStore
+        try:
+            ms = MissionStore(self.cfg.resolved_memory_db())
+        except Exception:
+            return []
+        queued = []
+        try:
+            for m in ms.unreported():
+                ch, _, cid = m["report_to"].partition(":")
+                if not ch or not cid:
+                    continue
+                done = [s for s in m["steps"] if s["status"] in ("ok", "fail")]
+                fresh = done[m["reported_steps"]:]
+                if not fresh:
+                    continue
+                lines = [f"{'✅' if s['status'] == 'ok' else '❌'} "
+                         f"[{s['agent']}] {(s['result'] or '')[:200]}"
+                         for s in fresh]
+                if m["status"] in ("done", "failed"):
+                    lines.append(f"🏁 project #{m['id']} {m['status']}: "
+                                 f"{m['goal'][:100]}")
+                else:
+                    lines.insert(0, f"🚧 project #{m['id']}: {m['goal'][:100]}")
+                mid = self.outbox.enqueue(ch, cid, "\n".join(lines)[:3500])
+                ms.mark_reported(m["id"], len(done))
+                queued.append({"id": mid, "channel": ch, "to": cid,
+                               "message": f"project #{m['id']}"})
+        except Exception as e:
+            log.warning("mission reports: %s", e)
+        finally:
+            try:
+                ms.close()
+            except Exception:
+                pass
+        return queued
+
     def _tick_intentions(self, now: float) -> list[dict]:
         """Act on one targeted intention per tick (custom ones: owner pulls)."""
         if _in_quiet(self.cfg.quiet_hours):
@@ -379,6 +416,7 @@ class ProactiveEngine:
         self._tick_dream(now)
         self._tick_brief(now, queued)
         queued += self._tick_intentions(now)
+        queued += self._tick_missions()
         with self.outbox._lock:
             rows = self.outbox._conn.execute(
                 "SELECT channel,chat_id,display,enabled,quiet,max_nudges,"

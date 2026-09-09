@@ -71,6 +71,9 @@ async function main() {
         if (path.startsWith('/recall')) return { hits: [{ id: 3, layer: 'semantic', scope: 'global', content: 'vault code', pinned: true }] };
         if (path.startsWith('/memories?')) return { memories: [{ id: 3, layer: 'semantic', scope: 'global', content: 'vault code', pinned: false }] };
         if (path === '/memories') return { ok: payload.id === 3 };
+        if (path === '/missions' && payload.action === 'create') return { started: true };
+        if (path === '/missions' && payload.action === 'resume') return payload.id === 1 ? { started: true } : { error: 'x' };
+        if (path === '/missions') return { missions: [{ id: 1, status: 'done', goal: 'research lizards' }] };
         throw new Error('unexpected ' + path);
     }
     const ctx = {
@@ -137,6 +140,10 @@ async function main() {
     has(await run('.mem pin 3'), 'done', 'mem pin');
     has(await run('.mem del 9'), 'no such', 'mem missing');
     has(await run('.mem edit 3 new text'), 'edited', 'mem edit');
+    has(await run('.project research lizards'), 'started', 'project');
+    has(await run('.project'), 'usage', 'project usage');
+    has(await run('.projects'), '#1', 'projects');
+    has(await run('.resume 1'), 'resumed', 'resume');
     console.log(`wa_owner.js OK (${n} asserts)`);
 }
 

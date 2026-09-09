@@ -31,10 +31,10 @@ fits the same API; SqliteVectorIndex/Chroma later).
 
 ## Next phases (approved)
 
-- **v4.1 tools + autonomy:** `Tool` registry (schemas, safety levels,
-  audit log) replacing regex tools; missions v2 (persistent, resumable,
-  sub-agents, tick progress, self-critique gate); fix `depends_on` being
-  ignored in the orchestrator fan-out.
+- **v4.1 tools + autonomy ✅ shipped:** `Tool` registry (schemas, safety
+  levels, audit log) replacing regex tools; missions v2 (persistent,
+  resumable, sub-agents, tick progress, self-critique gate); fixed
+  `depends_on` (topological waves) in the orchestrator fan-out.
 - **v4.2 personal-model path:** JSONL trajectory logging on every
   chat/mission; `.good`/`.bad` preference pairs; `gq export-training`
   (SFT + DPO packs); one-command LoRA script (RunPod/Colab) → GGUF →

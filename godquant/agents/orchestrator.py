@@ -19,6 +19,24 @@ from godquant.self_improve.evolver import SelfImprover
 log = logging.getLogger("godquant.orchestrator")
 
 
+def _waves(deps_list: list[list[int]]) -> list[list[int]]:
+    """Topological waves over index deps. Invalid refs ignored; cycles and
+    leftovers run last (never dropped, never deadlocked)."""
+    n = len(deps_list)
+    done: set[int] = set()
+    waves: list[list[int]] = []
+    while len(done) < n:
+        wave = [i for i in range(n)
+                if i not in done and all(
+                    (not isinstance(d, int) or d < 0 or d >= n or d in done)
+                    for d in (deps_list[i] or []))]
+        if not wave:  # cycle → flush leftovers
+            wave = [i for i in range(n) if i not in done]
+        waves.append(wave)
+        done.update(wave)
+    return waves
+
+
 class Orchestrator:
     def __init__(self, cfg, router, memory):
         self.cfg = cfg
@@ -85,13 +103,14 @@ class Orchestrator:
             improve: bool = True) -> list[AgentResult]:
         tasks = self.plan(goal, context)
         names = [self._assign(i, goal) for i in range(len(tasks))]
-        # heuristic plans return bare tasks; align agent per stage
+        # dependency waves: independent steps parallel, dependents wait
         results: list[AgentResult | None] = [None] * len(tasks)
         with cf.ThreadPoolExecutor(max_workers=self.cfg.max_workers) as ex:
-            futs = {ex.submit(self.run_task, names[i], tasks[i]): i
-                    for i in range(len(tasks))}
-            for f in cf.as_completed(futs):
-                results[futs[f]] = f.result()
+            for wave in _waves([t.depends_on for t in tasks]):
+                futs = {ex.submit(self.run_task, names[i], tasks[i]): i
+                        for i in wave}
+                for f in cf.as_completed(futs):
+                    results[futs[f]] = f.result()
         final = [r for r in results if r is not None]
         if improve:
             for r in final:
@@ -100,3 +119,80 @@ class Orchestrator:
                 except Exception as e:
                     log.debug("improve step failed: %s", e)
         return final  # type: ignore
+
+    # ---------- missions v2: persistent, resumable, sub-agents ----------
+    def run_mission(self, goal: str, context: dict | None = None,
+                    report_to: str = "", depth: int = 0,
+                    mission_id: int | None = None, _store=None) -> dict:
+        from godquant.agents.missions import MissionStore
+        store = _store or MissionStore(self.cfg.resolved_memory_db())
+        context = context or {}
+        if mission_id:
+            m = store.get(mission_id)
+            if not m:
+                return {"error": "no such mission"}
+            goal, steps, mid = m["goal"], m["steps"], mission_id
+        else:
+            tasks = self.plan(goal, context)
+            steps = [{"agent": self._assign(i, goal),
+                      "instruction": t.instruction,
+                      "depends_on": t.depends_on}
+                     for i, t in enumerate(tasks)]
+            m = store.create(goal, steps, context, report_to)
+            mid, steps = m["id"], m["steps"]
+        order = [i for wave in _waves([s.get("depends_on", [])
+                                       for s in steps]) for i in wave]
+        for i in order:
+            if steps[i]["status"] in ("ok", "fail", "skip"):
+                continue
+            instr = steps[i]["instruction"]
+            try:
+                if instr.strip().lower().startswith("spawn:") and depth < 1:
+                    sub = self.run_mission(instr[6:].strip(), context, "",
+                                           depth + 1, _store=store)
+                    out = (f"[SUB-MISSION #{sub.get('id')}] "
+                           f"{sub.get('summary', '')[:2000]}")
+                    ok = sub.get("status") == "done"
+                else:
+                    res = self.run_task(steps[i]["agent"],
+                                        AgentTask(instr, dict(context)))
+                    out, ok = res.output, res.ok
+                    if ok and steps[i]["agent"] != "reviewer":
+                        out, ok = self._critique(steps[i]["agent"], instr,
+                                                 out, goal, context)
+                store.save_step(mid, i, "ok" if ok else "fail", out)
+                steps[i]["status"] = "ok" if ok else "fail"
+            except Exception as e:
+                store.save_step(mid, i, "fail", str(e)[:500])
+                steps[i]["status"] = "fail"
+        failed = [s for s in steps if s["status"] == "fail"]
+        store.finish(mid, "done" if not failed else "failed")
+        summary = "\n\n".join(f"[{s['agent']}] {(s['result'] or '')[:1500]}"
+                                for s in steps)
+        try:
+            self.improver.judge_and_learn(summary[:4000], goal)
+        except Exception:
+            pass
+        return {"id": mid, "status": "done" if not failed else "failed",
+                "summary": summary[:4000]}
+
+    def _critique(self, agent: str, instruction: str, output: str,
+                  goal: str, context: dict) -> tuple:
+        """Reviewer gate: score<40 → single retry with critique attached."""
+        try:
+            rev = self.run_task(
+                "reviewer",
+                AgentTask(f"Score 0-100 + APPROVE/REVISE verdict for work "
+                          f"toward '{goal}':\n{output[:2000]}"))
+            if rev.score >= 40 or "APPROVE" in (rev.output or "").upper():
+                return output, True
+            retry = self.run_task(
+                agent, AgentTask(
+                    instruction + "\n\n[REVIEWER CRITIQUE — address this]:\n"
+                    + (rev.output or "")[:1000], dict(context)))
+            return retry.output, retry.ok
+        except Exception:
+            return output, True
+
+    def resume_mission(self, mission_id: int) -> dict:
+        return self.run_mission("", mission_id=mission_id)

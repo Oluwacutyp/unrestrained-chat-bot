@@ -141,6 +141,7 @@ server. WhatsApp: `WA_OWNER_NUMBER` + `.cmd` in any chat incl. self-chat.
 | `.note save <n> <text>` · `.note <n>` · `.note list` | long-term notes (case-insensitive names) |
 | `.fetch <url>` | agent reads a page (scripts stripped, 2000 chars) |
 | `.recall <query>` · `.mem list [scope]` · `.mem pin/unpin/del/edit` | unified memory: search everything, inspect + curate any memory (v4.0) |
+| `.project <goal>` · `.projects` · `.resume <id>` | persistent background projects with progress reports (v4.1) |
 
 Contacts get: `!reset` `!mood` `!search` `!news` `!wiki` `!fact` `!translate`.
 

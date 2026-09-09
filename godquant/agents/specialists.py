@@ -26,7 +26,10 @@ class ResearcherAgent(BaseAgent):
                 brief += f"\n\n[LIVE WEB RESULTS — cite these]\n{WS.smart_search(task.instruction)[:2500]}"
             except Exception:
                 pass
-        out = self.ask(brief)
+        if self.cfg.offline:
+            out = self.ask(brief)
+        else:
+            out = self.ask_with_tools(brief, ["web_fetch", "recall_memory"])
         try:
             self.memory.add("fact", out[:2000], tags="research")
         except Exception:
@@ -41,7 +44,10 @@ class CoderAgent(BaseAgent):
     CODE_RE = re.compile(r"```python\n(.*?)```", re.S)
 
     def execute(self, task: AgentTask) -> AgentResult:
-        out = self.ask(task.instruction)
+        if self.cfg.offline:  # offline: byte-identical legacy path
+            out = self.ask(task.instruction)
+        else:
+            out = self.ask_with_tools(task.instruction, ["py_run", "fs_read"])
         artifacts: dict = {}
         # extract first python block and smoke-test it in the sandbox
         m = self.CODE_RE.search(out)

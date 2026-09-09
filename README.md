@@ -51,6 +51,11 @@ One brain, two bridges — both **reply and deliver**, so the bot texts first:
 | `bridges/whatsapp.js` (Node, QR login) | ✅ DMs + groups | ✅ via outbox poll | **PC** (needs Chrome) |
 | `bridges/telegram_userbot.py` (MTProto, **your own account**) | ✅ DMs + groups | ✅ via outbox poll | **Termux ✅** |
 
+v4.1 tools + autonomy: **`Tool` registry** (read/act/dangerous levels,
+workspace jail, audit log, 9 tools), agentic `ask_with_tools` loop,
+**missions v2** (persistent, resumable, sub-missions, reviewer-gated
+retries, tick progress reports to self-chat via `.project`/`.projects`/
+`.resume`), orchestrator dependency waves (fixes ignored `depends_on`).
 v4.0 unified memory core: **Mind** facade over all stores — episodic /
 semantic / procedural layers, BM25 + priors recall (vector-ready),
 default-deny scopes, episodes logged from weighty moments, dream

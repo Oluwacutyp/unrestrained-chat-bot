@@ -29,6 +29,7 @@ API is backward compatible with whatsapp.js:
   POST /want {text..} + GET|POST /mind → intentions engine
   GET  /journal /brief + POST /dream /note /fetch → memory + briefing
   GET  /recall?q=&scope= | GET|POST /memories → unified memory ops
+  GET|POST /missions → persistent projects (create/list/get/resume)
 GET / serves the single-file chat UI (mobile-first, Termux-friendly).
 """
 from __future__ import annotations
@@ -207,6 +208,18 @@ class _Handler(BaseHTTPRequestHandler):
                     scope=q.get("scope", [""])[0], layer=q.get("layer", [""])[0],
                     limit=int(q.get("limit", ["50"])[0] or 50))
             return self._json({"memories": mems})
+        if parsed.path == "/missions":
+            from godquant.agents.missions import MissionStore
+            with self.lock:
+                ms = MissionStore(cfg.resolved_memory_db())
+                try:
+                    out = ms.list(status=q.get("status", [""])[0])
+                finally:
+                    ms.close()
+            return self._json({"missions": [
+                {"id": m["id"], "goal": m["goal"][:200], "status": m["status"],
+                 "steps": [{"agent": s2["agent"], "status": s2["status"]}
+                           for s2 in m["steps"]]} for m in out]})
         if parsed.path == "/mood":
             with self.lock:
                 return self._json(companion.moods.snapshot(cid))
@@ -484,25 +497,21 @@ class _Handler(BaseHTTPRequestHandler):
                             if c["display"]}
                     return self._json(run_dream(companion.bonds, cmap, mind=self.mind))
             if path == "/fetch":
-                import re as _re
-                import urllib.request as _url
-                url = (data.get("url") or "").strip()
-                if not url.startswith(("http://", "https://", "file://")):
-                    return self._json({"error": "need http(s) or file url"}, 400)
-                try:
-                    req = _url.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                    with _url.urlopen(req, timeout=15) as r:
-                        html = r.read()[:200000].decode("utf-8", "replace")
-                    m = _re.search(r"<title[^>]*>(.*?)</title>", html,
-                                   _re.I | _re.S)
-                    title = _re.sub(r"\s+", " ", m.group(1)).strip()[:200] if m else ""
-                    text = _re.sub(r"<script.*?</script>|<style.*?</style>", " ",
-                                   html, flags=_re.I | _re.S)
-                    text = _re.sub(r"<[^>]+>", " ", text)
-                    text = _re.sub(r"\s+", " ", text).strip()[:2000]
-                    return self._json({"ok": True, "title": title, "text": text})
-                except Exception as e:
-                    return self._json({"error": f"fetch failed: {e}"}, 502)
+                from godquant.tools.registry import run_tool
+                r = run_tool("web_fetch",
+                             {"url": (data.get("url") or "").strip()},
+                             {"memory": self.mind.mem})
+                if not r["ok"]:
+                    code = 400 if "need http" in r["error"] else 502
+                    return self._json({"error": r["error"]}, code)
+                out, title, body = r["output"], "", ""
+                if out.startswith("TITLE: "):
+                    first, _, rest = out.partition("\n")
+                    title = first[7:].strip()
+                    body = rest[6:].strip() if rest.startswith("TEXT: ") else rest
+                elif out.startswith("TEXT: "):
+                    body = out[6:].strip()
+                return self._json({"ok": True, "title": title, "text": body})
             if path == "/memories":
                 act = (data.get("action") or "").lower()
                 mid = int(data.get("id", 0))
@@ -518,6 +527,38 @@ class _Handler(BaseHTTPRequestHandler):
                         return self._json({"ok": self.mind.forget(mid)})
                 return self._json(
                     {"error": "action: pin|unpin|edit|delete + id"}, 400)
+            if path == "/missions":
+                from godquant.agents.missions import MissionStore
+                act = (data.get("action") or "list").lower()
+                ms = MissionStore(cfg.resolved_memory_db())
+                try:
+                    if act == "list":
+                        return self._json({"missions": [
+                            {"id": m["id"], "goal": m["goal"][:200],
+                             "status": m["status"]} for m in ms.list()]})
+                    if act == "get":
+                        m = ms.get(int(data.get("id", 0)))
+                        return self._json({"mission": m} if m
+                                          else {"error": "no such mission"})
+                    if act in ("create", "resume"):
+                        import threading as _th
+                        a, g = act, (data.get("goal") or "")
+                        rid, rto = int(data.get("id", 0)), data.get("report_to", "")
+
+                        def _run():
+                            try:
+                                if a == "create":
+                                    orch.run_mission(g, {"user": "owner"}, rto)
+                                else:
+                                    orch.resume_mission(rid)
+                            except Exception as e:
+                                log.warning("mission %s failed: %s", a, e)
+                        _th.Thread(target=_run, daemon=True).start()
+                        return self._json({"started": True, "action": act})
+                finally:
+                    ms.close()
+                return self._json({"error": "action: list|get|create|resume"},
+                                  400)
             if path == "/warn":
                 msg = (data.get("message") or "").strip()[:500]
                 if not msg:

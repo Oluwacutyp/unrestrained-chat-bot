@@ -17,12 +17,12 @@ HELP = {
                  "`.send <chat> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                  "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                  "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.help`"),
+                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.help`"),
     "discord": ("discord cmds: `.mission <goal>` `.code <task>` `.exec <shell>` `.tick` "
                 "`.send <id> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                 "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                 "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.help`"),
+                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.snooze <id> <when>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.recall <q>` `.mem …` `.project <goal>` `.projects` `.resume <id>` `.help`"),
 }
 
 
@@ -251,6 +251,28 @@ async def run_owner_command(api, channel: str, cmd: str, arg: str,
                                         "content": parts[2]})
             return "edited ✅" if r.get("ok") else "no such memory"
         return "usage: .mem list [scope] | pin|unpin|del <id> | edit <id> <text>"
+    if cmd == "project":
+        if not arg.strip():
+            return "usage: .project <goal> — runs in background, reports here"
+        r = await api("/missions", {"action": "create", "goal": arg.strip(),
+                                    "report_to": f"{channel}:{chat}"})
+        if r.get("started"):
+            return "project started 🚀 (progress lands here)"
+        return f"project failed: {r.get('error')}"
+    if cmd == "projects":
+        r = await api("/missions", {"action": "list"})
+        ms = r.get("missions", [])
+        if not ms:
+            return "no projects yet 🚧"
+        return "\n".join(f"#{m['id']} [{m['status']}] {m['goal'][:100]}"
+                          for m in ms)[:3000]
+    if cmd == "resume":
+        if not arg.strip().isdigit():
+            return "usage: .resume <project id>"
+        r = await api("/missions", {"action": "resume", "id": int(arg.strip())})
+        if r.get("started"):
+            return "resumed 🚀"
+        return f"resume failed: {r.get('error')}"
     if cmd == "stats":
         r = await api("/status")
         mems = r.get("memories", {})

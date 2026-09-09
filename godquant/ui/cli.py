@@ -512,7 +512,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     pc = sub.add_parser("partner", help="chat with the AI partner (persona+mood+tools)")
     pc.add_argument("message", nargs="?", help="single message (omit for REPL)")
-    pc.add_argument("--persona", default=None, help="alex|companion|realistic|quant")
+    pc.add_argument("--persona", default=None, help="devon|alex|companion|realistic|quant")
     pc.add_argument("--cid", default="cli")
     pc.add_argument("--search", action="store_true")
 

@@ -187,13 +187,18 @@ async def run_user_cmd(cmd: str, arg: str, sender_id: int) -> str | None:
         kind = {"search": "text", "fact": "fact_check"}.get(cmd, cmd)
         r = await api("/research", {"query": arg, "type": kind}, timeout=60)
         return r.get("results", "no results")
+    if cmd in ("translate", "tr", "pidgin"):
+        if not arg:
+            return "usage: !translate <text> (English ↔ Naija pidgin)"
+        r = await api("/translate", {"text": arg}, timeout=60)
+        return r.get("translation") or "couldn't translate that rn 😅"
     return None
 
 
 # owner commands (YOU, via outgoing messages starting with PREFIX, anywhere)
 HELP = ("userbot cmds: `.mission <goal>` `.tick` `.send <chat> <msg>` "
         "`.contacts` `.mood [chat]` `.reset [chat]` `.persona <n>` "
-        "`.bond [chat] [0-3]` `.help`")
+        "`.bond [chat] [0-3|auto]` `.memory [chat]` `.help`")
 
 
 async def run_owner_cmd(cmd: str, arg: str) -> str:
@@ -229,14 +234,28 @@ async def run_owner_cmd(cmd: str, arg: str) -> str:
         global PERSONA
         PERSONA = arg.strip()
         return f"persona → {PERSONA}"
+    if cmd == "memory":
+        target = arg.strip() or "me"
+        r = await api(f"/memory?channel=telegram&chat_id={target}")
+        facts = r.get("facts", [])
+        b = r.get("bond", {})
+        head = (f"memory[{target}] L{b.get('level')} score {b.get('score')} "
+                f"fric {b.get('friction')} streak {b.get('streak')}d")
+        if not facts:
+            return head + " — no facts yet 🧠"
+        rest = " | ".join(f"{f['key']}={f['value']}" for f in facts)
+        return (head + " | " + rest)[:3500]
     if cmd == "bond":
         parts = arg.split()
         target = parts[0] if parts else "me"
         if len(parts) > 1:
-            try:
-                level = int(parts[1])
-            except ValueError:
-                return "usage: .bond [chat] [0-3]"
+            if parts[1].lower() == "auto":
+                level = "auto"
+            else:
+                try:
+                    level = int(parts[1])
+                except ValueError:
+                    return "usage: .bond [chat] [0-3|auto]"
             r = await api("/bond", {"channel": "telegram",
                                     "chat_id": target, "level": level})
             b = r.get("bond", {})

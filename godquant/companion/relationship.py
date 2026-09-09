@@ -34,6 +34,17 @@ CREATE TABLE IF NOT EXISTS bonds (
   PRIMARY KEY (channel, chat_id)
 );
 """
+
+_FACTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS bond_facts (
+  channel TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  fkey TEXT NOT NULL,
+  fvalue TEXT NOT NULL,
+  updated REAL NOT NULL,
+  PRIMARY KEY (channel, chat_id, fkey, fvalue)
+);
+"""
 _NEW_COLS = {"score": "REAL DEFAULT 0", "friction": "REAL DEFAULT 0",
              "streak": "INTEGER DEFAULT 0", "last_day": "TEXT DEFAULT ''",
              "last_ts": "REAL DEFAULT 0", "burst": "INTEGER DEFAULT 0",
@@ -215,7 +226,7 @@ class BondStore:
                                      timeout=30)
         self._lock = threading.Lock()
         with self._lock:
-            self._conn.executescript(_SCHEMA)
+            self._conn.executescript(_SCHEMA + _FACTS_SCHEMA)
             have = {r[1] for r in self._conn.execute(
                 "PRAGMA table_info(bonds)").fetchall()}
             for col, ddl in _NEW_COLS.items():
@@ -374,3 +385,39 @@ class BondStore:
                      "friction": friction, "substance": 0.0, "warmth": 0.0,
                      "spam": False})
         return bond
+
+    # ---- per-sender facts / dossier ----
+    def add_fact(self, channel: str, chat_id: str, key: str, value: str,
+                 now: float | None = None) -> list[tuple[str, str]]:
+        """Store one durable fact. Single-value keys replace; rest accumulate."""
+        import time as _t
+        from godquant.companion.memory_engine import SINGLE_KEYS
+        now = _t.time() if now is None else now
+        value = (value or "").strip()
+        if not key or not value:
+            return self.get_facts(channel, chat_id)
+        with self._lock:
+            if key in SINGLE_KEYS:
+                self._conn.execute(
+                    "DELETE FROM bond_facts WHERE channel=? AND chat_id=? AND fkey=?",
+                    (channel, chat_id, key))
+            self._conn.execute(
+                "INSERT OR IGNORE INTO bond_facts(channel,chat_id,fkey,fvalue,"
+                "updated) VALUES(?,?,?,?,?)",
+                (channel, chat_id, key, value, now))
+            self._conn.commit()
+        return self.get_facts(channel, chat_id)
+
+    def get_facts(self, channel: str, chat_id: str) -> list[tuple[str, str]]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT fkey,fvalue FROM bond_facts WHERE channel=? AND chat_id=? "
+                "ORDER BY updated", (channel, chat_id))
+            return [(r[0], r[1]) for r in cur.fetchall()]
+
+    def clear_facts(self, channel: str, chat_id: str):
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM bond_facts WHERE channel=? AND chat_id=?",
+                (channel, chat_id))
+            self._conn.commit()

@@ -16,6 +16,8 @@ API is backward compatible with whatsapp.js:
   GET|POST /contacts     → proactive-texting registry
   POST /tick             → run proactive pass now
   GET|POST /bond         → relationship score/friction (get / owner-pin 0-3/auto)
+  GET  /memory?channel&chat_id → stored facts + bond dossier
+  POST /translate {text, target?} → English ↔ Naija pidgin translation
 GET / serves the single-file chat UI (mobile-first, Termux-friendly).
 """
 from __future__ import annotations
@@ -155,10 +157,22 @@ class _Handler(BaseHTTPRequestHandler):
             _, _, _, _, companion = self.stack
             with self.lock:
                 return self._json({"bond": companion.bonds.get(channel, chat_id)})
+        if parsed.path == "/memory":
+            channel = q.get("channel", ["telegram"])[0]
+            chat_id = q.get("chat_id", [""])[0]
+            if not chat_id:
+                return self._json({"error": "need chat_id"}, 400)
+            _, _, _, _, companion = self.stack
+            with self.lock:
+                facts = companion.bonds.get_facts(channel, chat_id)
+                bond = companion.bonds.get(channel, chat_id)
+            return self._json({"facts": [{"key": k, "value": v}
+                                         for k, v in facts],
+                               "bond": bond})
         return self._json({"error": "not found"}, 404)
 
     def do_POST(self):
-        cfg, _, _, orch, companion = self.stack
+        cfg, router, _, orch, companion = self.stack
         data = self._body()
         path = urllib.parse.urlparse(self.path).path
         try:
@@ -212,6 +226,26 @@ class _Handler(BaseHTTPRequestHandler):
                 with self.lock:
                     bond = companion.bonds.set_level(ch, str(chat_id), n)
                 return self._json({"bond": bond})
+            if path == "/translate":
+                text = (data.get("text") or "").strip()
+                if not text:
+                    return self._json({"error": "need {text}"}, 400)
+                target = (data.get("target") or "auto").lower()
+                if "pidgin" in target:
+                    goal = "Translate the text to fluent Nigerian Pidgin."
+                elif "english" in target:
+                    goal = "Translate the text to natural English."
+                else:
+                    goal = ("If the text is English, translate it to fluent "
+                            "Nigerian Pidgin. If it is Nigerian Pidgin (or "
+                            "mixed), translate it to natural English.")
+                with self.lock:
+                    t = router.complete(
+                        "You are Devon's translator. Output ONLY the "
+                        "translation, no quotes, no explanation.",
+                        f"{goal}\n\nTEXT: {text}",
+                        agent="companion").text.strip()
+                return self._json({"translation": t})
             if path == "/contacts":
                 ch, chat_id = data.get("channel"), data.get("chat_id")
                 if not ch or not chat_id:

@@ -43,7 +43,7 @@ class GodQuantConfig:
     # --- Memory ---
     memory_db: str = ""                 # empty = ~/.godquant/memory.db
     # --- Companion (Partner fusion) ---
-    persona: str = "alex"           # alex|companion|realistic|quant
+    persona: str = "devon"          # devon|alex|companion|realistic|quant
     server_host: str = "0.0.0.0"
     server_port: int = 5000
     model_path: str = ""            # GGUF for llamacpp (empty = ~/.godquant/models/*.gguf)

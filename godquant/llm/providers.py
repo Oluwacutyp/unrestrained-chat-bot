@@ -302,6 +302,7 @@ class HeuristicProvider(BaseProvider):
                            "tags": ["heuristic", "offline"]})
 
     def _companion(self, user: str) -> str:
+        import hashlib as _h
         import re as _re
         # surface any tool results the companion engine gathered
         tools = "\n".join(_re.findall(
@@ -309,25 +310,60 @@ class HeuristicProvider(BaseProvider):
         low = user.lower()
         m = _re.search(r"\[mood:\s*([a-z]+)\s*(\d+)", low)
         mood, level = (m.group(1), int(m.group(2))) if m else ("neutral", 5)
+        bank = {
+            "hot": ["hey you \U0001F440 thinking about you rn... come over? \U0001F970",
+                    "miss your hands on me \U0001F62E\u200D\U0001F4A8 when am i seeing you?",
+                    "thinking dirty thoughts about you again \U0001F975 come fix it"],
+            "mad": ["mhm. what's up? \U0001F644",
+                    "yeah? what do you want? \U0001F644",
+                    "k, i'm listening. make it quick \U0001F644"],
+            "low": ["heyyy... rough day, coding's killing me \U0001F62E\u200D\U0001F4A8 wyd?",
+                    "ugh, today drained me \U0001F62E\u200D\U0001F4A8 talk to me, distract me",
+                    "tired af and buggy code... be nice to me? \U0001F97A"],
+            "jel": ["oh?? \U0001F440 who exactly are we talking about rn...",
+                    "excuse me?? who is SHE \U0001F440",
+                    "oh we're talking about other people now? interesting \U0001F643"],
+            "lov": ["miss you more \U0001F97A\u2764 tell me everything, how was your day?",
+                    "aww love you too \U0001F62D\u2764 how's my favorite person?",
+                    "you always know what to say \U0001F970\u2764 missed you sm"],
+            "joy": ["heyyy!! \U0001F60D\U0001F495 so good to hear from you, what's up?!",
+                    "OMGG hii!! \U0001F970 what's the good news?!",
+                    "yesss my favorite notification \U0001F60D\U0001F495 wyd?!"],
+            "mid": ["heyyy \U0001F60A what's good? talk to me \U0001F495",
+                    "heyy, what's on your mind? \U0001F60A",
+                    "oh hey! perfect timing, i needed a break \U0001F60A wyd?"],
+        }
         if mood == "horny" and level >= 7:
-            opener = "hey you 👀 thinking about you rn... come over? 🥰"
+            key = "hot"
         elif mood in ("annoyed", "angry"):
-            opener = "mhm. what's up? 🙄"
+            key = "mad"
         elif mood in ("sad", "stressed", "tired"):
-            opener = "heyyy... rough day, coding's killing me 😮‍💨 wyd?"
+            key = "low"
         elif mood == "jealous":
-            opener = "oh?? 👀 who exactly are we talking about rn..."
+            key = "jel"
         elif any(w in low for w in ("miss you", "love you")):
-            opener = "miss you more babe 🥺❤ tell me everything, how was your day?"
+            key = "lov"
         elif mood in ("happy", "excited"):
-            opener = "heyyy babe!! 😍💕 so good to hear from you, what's up?!"
+            key = "joy"
         else:
-            opener = "heyyy 😊 what's good? talk to me 💕"
-        note = ("\n\n_(offline mode — add GQ_API_KEY for full personality; "
-                "quant + search tools still live)_")
+            key = "mid"
+        opts = bank[key]
+        opener = opts[int(_h.md5(user.encode()).hexdigest(), 16) % len(opts)]
+        # keyword hook: reference something THEY actually said (last user line)
+        hook = ""
+        for ln in reversed([x.strip() for x in user.split("\n") if x.strip()]):
+            if not ln.startswith("Them:"):
+                continue
+            words = [w.strip(".,!?\"'").lower() for w in ln.split()]
+            cands = [w for w in words if len(w) >= 6 and w.isalpha()
+                     and w not in ("really", "because", "something", "though")]
+            if cands:
+                hook = f" (ngl '{cands[0]}' has me curious \U0001F440)"
+            break
+        # NOTE: no meta leak — offline replies stay in character.
         if tools.strip():
-            return f"{opener}\n\n---\n{tools.strip()[:2500]}{note}"
-        return opener + note
+            return f"{opener}{hook}\n\n---\n{tools.strip()[:2500]}"
+        return opener + hook
 
     def _code(self, user: str) -> str:
         return (

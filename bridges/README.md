@@ -33,7 +33,8 @@ python bridges/telegram_userbot.py               # first run: phone number + log
 - **Owner commands** — send from YOUR account anywhere, starting with `.`:
   `.mission <goal>` · `.tick` (force proactive pass) · `.send <chat|me> <msg>`
   · `.contacts` · `.mood` · `.reset` · `.persona alex`
-  · `.bond [chat] [0-3]` (view/pin relationship level) · `.help`
+  · `.bond [chat] [0-3|auto]` (view/pin relationship level)
+  · `.memory [chat]` (view stored facts + bond) · `.help`
 - **Humanizer** (v3.3): read pauses (+depth for heavy texts), mood-paced
   typing (angry = fast, sad = slow), multi-bubble splits, rare human typos
   with `*corrections`, "got distracted" pauses in long rapid sessions, and
@@ -44,6 +45,7 @@ python bridges/telegram_userbot.py               # first run: phone number + log
   decays, day-streaks deepen. `.bond <chat>` shows score/friction/streak;
   `.bond <chat> auto` resumes auto-pilot after a pin.
 - **DM commands** (contacts): `!reset` `!mood` `!search <q>` `!news <q>` `!wiki <q>` `!fact <q>`
+  `!translate <text>` (English ↔ Naija pidgin, Devon is fluent)
 - **Text itself**: `.send me good morning ❤` lands in your Saved Messages.
   The proactive ticker texts silent contacts automatically (see below).
 - **Missed messages**: the userbot answers texts that arrive while it's running.

@@ -18,6 +18,8 @@ from godquant.agents.base import AgentResult, AgentTask, BaseAgent
 from godquant.companion import web_search as WS
 from godquant.companion.mood import MoodEngine
 from godquant.companion.personas import get_persona, render_persona
+from godquant.companion.memory_engine import (clean_reply, dossier_text,
+                                             extract_facts, fallback_line)
 from godquant.companion.relationship import (BondStore, addressing,
                                             parse_bond_id, vibe_context)
 from godquant.llm import prompts
@@ -69,6 +71,46 @@ class CompanionAgent(BaseAgent):
             who = "Them" if msg["role"] == "user" else "You"
             out.append(f"{who}: {msg['content'][:120]}...")
         return "\n".join(out)
+
+    def recall(self, cid: str, query: str) -> str:
+        """Older-than-history memories (rolling summaries for this chat)."""
+        try:
+            hits = self.memory.search("summary", kind="summary", limit=10)
+        except Exception:
+            return ""
+        for m in hits:
+            if cid in (m.tags or ""):
+                return ("\n[OLDER MEMORIES — things from earlier chats, still true]\n"
+                        f"{m.content[:900]}\n")
+        return ""
+
+    def summarize_if_due(self, cid: str, history: list[dict]):
+        """Rolling memory: every ~25 msgs, compress older chat to a summary."""
+        if self.cfg.offline or len(history) < 30:
+            return
+        try:
+            have = [m for m in self.memory.search("summary", kind="summary",
+                                                 limit=20)
+                    if cid in (m.tags or "")]
+        except Exception:
+            return
+        if len(history) < 30 + len(have) * 25:
+            return
+        chunk = "\n".join(
+            f"{'Them' if m['role'] == 'user' else 'You'}: {m['content'][:300]}"
+            for m in history[:20])
+        try:
+            text = self.router.complete(
+                "Compress this chat into durable memories: names, facts, promises, "
+                "fights, inside jokes, feelings. Terse bullet lines, no fluff.",
+                chunk, agent=self.name).text.strip()
+        except Exception:
+            return
+        if text:
+            try:
+                self.memory.add("summary", text[:1500], tags=f"summary {cid}")
+            except Exception:
+                pass
 
     # ---------- tools ----------
     def _maybe_tools(self, text: str) -> str:
@@ -131,6 +173,13 @@ class CompanionAgent(BaseAgent):
         rel_block = addressing(bond["level"], sender_name or bwho, is_group,
                                bond)
         vibe_block = vibe_context(message, gap)
+        for _k, _v in extract_facts(message):
+            try:
+                self.bonds.add_fact(bch, bwho, _k, _v)
+            except Exception:
+                pass
+        dossier_block = dossier_text(self.bonds.get_facts(bch, bwho),
+                                     sender_name or bwho)
 
         tool_ctx = self._maybe_tools(message)
         if use_search and "[TOOL:WEB]" not in tool_ctx:
@@ -149,6 +198,11 @@ class CompanionAgent(BaseAgent):
         system += "\n" + rel_block
         if vibe_block:
             system += "\n" + vibe_block
+        if dossier_block:
+            system += "\n" + dossier_block
+        mem_block = self.recall(cid, message)
+        if mem_block:
+            system += mem_block
         convo = "\n".join(f"{'Them' if m['role'] == 'user' else 'You'}: {m['content'][:500]}"
                           for m in history[-8:])
         mood_tag = f"\n[MOOD: {mood_state.current} {mood_state.level}/10]"
@@ -157,9 +211,19 @@ class CompanionAgent(BaseAgent):
 
         sampling = self.moods.sampling(cid)
         text = self.router.complete(system, user_block, agent=self.name).text
+        text = clean_reply(text or "", message)
+        if not text.strip():  # empty reply: nudge once, never placeholder
+            text = self.router.complete(
+                system, user_block + "\n[SYSTEM: your reply came back empty — "
+                "you MUST send a real in-character text now.]",
+                agent=self.name).text
+            text = clean_reply(text or "", message)
+        if not text.strip():
+            text = fallback_line(persona, message)
 
         self._save_msg(cid, "user", message)
         self._save_msg(cid, "assistant", text)
+        self.summarize_if_due(cid, history)
         return {"response": text,
                 "mood": mood_state.current,
                 "mood_level": mood_state.level,

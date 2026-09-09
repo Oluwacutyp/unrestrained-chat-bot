@@ -51,6 +51,12 @@ One brain, two bridges — both **reply and deliver**, so the bot texts first:
 | `bridges/whatsapp.js` (Node, QR login) | ✅ DMs + groups | ✅ via outbox poll | **PC** (needs Chrome) |
 | `bridges/telegram_userbot.py` (MTProto, **your own account**) | ✅ DMs + groups | ✅ via outbox poll | **Termux ✅** |
 
+v3.4 god-tier companion: meet **Devon S.Kemp** (default persona) — 28, Almont
+CO freelance programmer, fierce, loyal, pidgin-fluent (`!translate` anything).
+Superb memory: per-person dossiers (names, boundaries like "not your babe",
+likes, `remember that...`), rolling chat summaries, anti-echo replies, and
+empty-reply retry — nothing gets mixed up. Check any dossier with
+`.memory <chat>`.
 v3.3 social brain: replies are **clean** (no mood footer), with read pauses,
 mood-paced typing, multi-bubble splits, rare typos + `*corrections`, and
 distracted pauses. Relationships are a **0-100 score** from substance ×

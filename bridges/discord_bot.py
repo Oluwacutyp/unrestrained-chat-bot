@@ -166,10 +166,10 @@ HELP = ("discord cmds: `.tick` `.send <channel_or_user_id> <msg>` `.contacts` "
         "`.import [limit]` (this channel's history) `.help`")
 
 
-async def run_owner_cmd(cmd: str, arg: str) -> str:
+async def run_owner_cmd(cmd: str, arg: str, chat: str = "me") -> str:
     """Owner commands via the shared core (import handled in handler)."""
     from bridges.owner import run_owner_command
-    return await run_owner_command(api, "discord", cmd, arg)
+    return await run_owner_command(api, "discord", cmd, arg, chat)
 
 
 async def handle_message(message, client) -> str | None:
@@ -185,7 +185,8 @@ async def handle_message(message, client) -> str | None:
         if cmd.lower() == "import":
             return await import_channel(message)
         try:
-            out = await run_owner_cmd(cmd.lower(), arg.strip())
+            chat = str(getattr(getattr(message, "channel", None), "id", "me"))
+            out = await run_owner_cmd(cmd.lower(), arg.strip(), chat)
         except Exception as e:
             out = f"owner cmd failed: {e}"
         await message.channel.send(out[:2000])

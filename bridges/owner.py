@@ -5,6 +5,10 @@ their client-specific bits (.import needs the live client) and delegate here.
 """
 from __future__ import annotations
 
+import re
+import time
+from datetime import datetime, timedelta
+
 PERSONAS = ("devon", "alex", "companion", "realistic", "quant")
 
 HELP = {
@@ -12,16 +16,17 @@ HELP = {
                  "`.send <chat> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                  "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                  "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                 "`.stats` `.import <chat>` `.help`"),
+                 "`.stats` `.import <chat>` `.remind <when> <text>` `.reminders` `.cancel <id>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.help`"),
     "discord": ("discord cmds: `.mission <goal>` `.code <task>` `.exec <shell>` `.tick` "
                 "`.send <id> <msg>` `.contacts` `.mood [chat]` `.reset [chat]` "
                 "`.persona [chat] [name|clear]` `.bond [chat] [0-3|auto]` "
                 "`.memory [chat]` `.forget <chat> [deep]` `.models` `.model <name>` "
-                "`.stats` `.import [limit]` `.help`"),
+                "`.stats` `.import [limit]` `.remind <when> <text>` `.reminders` `.cancel <id>` `.want <goal>` `.mind [done|drop <id>]` `.journal [chat]` `.note <save|get|list|del>` `.dream` `.brief` `.fetch <url>` `.help`"),
 }
 
 
-async def run_owner_command(api, channel: str, cmd: str, arg: str) -> str:
+async def run_owner_command(api, channel: str, cmd: str, arg: str,
+                            chat: str = "me") -> str:
     """Run an owner command against the brain. `api` is the bridge's caller."""
     cmd = (cmd or "").lower()
     if cmd == "help":
@@ -131,6 +136,77 @@ async def run_owner_command(api, channel: str, cmd: str, arg: str) -> str:
         if r.get("error"):
             return f"model failed: {r['error']}"
         return f"primary → {r.get('primary')} ⚡"
+    if cmd == "remind":
+        return await _remind(api, channel, chat, arg)
+    if cmd == "reminders":
+        r = await api("/remind", {"action": "list"})
+        rs = r.get("reminders", [])
+        if not rs:
+            return "no reminders ⏰"
+        return "\n".join(
+            f"#{x['id']} {x['channel']}:{x['chat_id']} " +
+            datetime.fromtimestamp(x["due_ts"]).strftime("%m-%d %H:%M") +
+            (" ↻" if x["repeat"] else "") + f" — {x['text'][:80]}"
+            for x in rs)[:3500]
+    if cmd == "cancel":
+        if not arg.strip().isdigit():
+            return "usage: .cancel <reminder id>"
+        r = await api("/remind", {"action": "cancel",
+                                  "id": int(arg.strip())})
+        return "cancelled ✅" if r.get("cancelled") else "no such reminder"
+    if cmd == "want":
+        if not arg.strip():
+            return "usage: .want <goal — she plans around it>"
+        r = await api("/want", {"text": arg.strip()})
+        return f"intention #{r.get('id')} noted 🎯"
+    if cmd == "mind":
+        parts = arg.split()
+        if len(parts) == 2 and parts[0] in ("done", "drop") \
+                and parts[1].isdigit():
+            r = await api("/mind", {"action": parts[0], "id": int(parts[1])})
+            return "updated ✅" if r.get("ok") else "no such intention"
+        r = await api("/mind")
+        ins, rems, dr = (r.get("intentions", []), r.get("reminders", []),
+                         r.get("dream", {}))
+        lines = [f"🎯 {len(ins)} intentions"]
+        lines += [f"  #{i['id']} [{i['kind']}] {i['text'][:70]}"
+                  for i in ins[:8]]
+        lines.append(f"⏰ {len(rems)} reminders")
+        lines += [f"  #{x['id']} " +
+                  datetime.fromtimestamp(x["due_ts"]).strftime("%m-%d %H:%M") +
+                  f" {x['text'][:60]}" for x in rems[:8]]
+        if dr:
+            lines.append(f"🌙 dream: {dr.get('chats', 0)} chats, "
+                         f"{dr.get('merged', 0)} merged")
+        return "\n".join(lines)[:3500]
+    if cmd == "journal":
+        target = arg.strip() or chat
+        r = await api(f"/journal?channel={channel}&chat_id={target}&limit=3")
+        es = r.get("entries", [])
+        if not es:
+            return f"no journal for {target} yet 📓"
+        return "\n\n".join(f"[{e['day']}] {e['entry']}" for e in es)[:3500]
+    if cmd == "note":
+        return await _note(api, arg)
+    if cmd == "dream":
+        r = await api("/dream", {}, timeout=120)
+        out = (f"🌙 dream: {r.get('chats', 0)} chats, "
+               f"{r.get('merged', 0)} merged, journal {r.get('journal', 0)}, "
+               f"check-ins {len(r.get('intentions', []))}")
+        if r.get("conflicts"):
+            out += "\nconflicts: " + "; ".join(r["conflicts"][:5])
+        return out
+    if cmd == "brief":
+        r = await api("/brief")
+        return r.get("brief", "(no brief)")
+    if cmd == "fetch":
+        if not arg.strip():
+            return "usage: .fetch <url>"
+        r = await api("/fetch", {"url": arg.strip()}, timeout=60)
+        if r.get("error"):
+            return f"fetch failed: {r['error']}"
+        head = f"📰 {r['title']}\n" if r.get("title") else ""
+        return (head + (r.get("text") or "")[:3000]) or "(empty page)"
     if cmd == "stats":
         r = await api("/status")
         mems = r.get("memories", {})
@@ -172,3 +248,77 @@ async def _persona(api, channel: str, arg: str) -> str:
     if name == "clear":
         return f"persona[{chat}] cleared → default 💕"
     return f"persona[{chat}] → {name} 💕"
+
+_WHEN_RE = re.compile(
+    r"^(in\s+\d+\s*[mhd]|tomorrow\s+\d{1,2}:\d{2}|"
+    r"every\s+day\s+\d{1,2}:\d{2}|\d{1,2}:\d{2})\s+(.+)$", re.I)
+
+
+def parse_when(s: str, now: float | None = None):
+    """'in 30m|2h|3d' | 'tomorrow 7:00' | 'every day 8:00' | 'HH:MM'
+    → (due_ts, repeat) or None."""
+    now = time.time() if now is None else now
+    t = (s or "").strip().lower()
+    m = re.match(r"in\s+(\d+)\s*([mhd])$", t)
+    if m:
+        return now + int(m.group(1)) * {"m": 60, "h": 3600,
+                                        "d": 86400}[m.group(2)], ""
+    m = re.match(r"(tomorrow\s+)?(\d{1,2}):(\d{2})$", t)
+    if m:
+        base = datetime.now() + timedelta(days=1 if m.group(1) else 0)
+        dt = base.replace(hour=int(m.group(2)), minute=int(m.group(3)),
+                          second=0, microsecond=0)
+        ts = dt.timestamp()
+        if ts <= now and not m.group(1):
+            ts += 86400
+        return ts, ""
+    m = re.match(r"every\s+day\s+(\d{1,2}):(\d{2})$", t)
+    if m:
+        dt = datetime.now().replace(hour=int(m.group(1)),
+                                    minute=int(m.group(2)),
+                                    second=0, microsecond=0)
+        ts = dt.timestamp()
+        if ts <= now:
+            ts += 86400
+        return ts, "daily"
+    return None
+
+
+async def _remind(api, channel: str, chat: str, arg: str) -> str:
+    m = _WHEN_RE.match((arg or "").strip())
+    if not m or not parse_when(m.group(1)):
+        return ("usage: .remind <in 30m|2h|3d · tomorrow 7:00 · "
+                "every day 8:00 · 19:30> <text>")
+    due, repeat = parse_when(m.group(1))
+    r = await api("/remind", {"action": "add", "channel": channel,
+                              "chat_id": chat, "text": m.group(2).strip(),
+                              "due_ts": due, "repeat": repeat})
+    if r.get("error"):
+        return f"remind failed: {r['error']}"
+    when = datetime.fromtimestamp(due).strftime("%m-%d %H:%M")
+    return (f"⏰ #{r.get('id')} {when}"
+            f"{' ↻daily' if repeat else ''} — {m.group(2).strip()[:100]}")
+
+
+async def _note(api, arg: str) -> str:
+    parts = (arg or "").split(None, 1)
+    if not parts or parts[0].lower() == "list":
+        r = await api("/note", {"action": "list"})
+        ns = r.get("notes", [])
+        return "notes: " + ", ".join(ns) if ns else "no notes yet 📝"
+    sub = parts[0].lower()
+    if sub == "save":
+        rest = parts[1] if len(parts) > 1 else ""
+        name, _, body = rest.partition(" ")
+        if not name or not body.strip():
+            return "usage: .note save <name> <text>"
+        r = await api("/note", {"action": "save", "name": name,
+                                "body": body.strip()})
+        return f"noted [{r.get('saved')}] 📝"
+    if sub == "del" and len(parts) > 1:
+        r = await api("/note", {"action": "del", "name": parts[1].strip()})
+        return "deleted ✅" if r.get("deleted") else "no such note"
+    r = await api("/note", {"action": "get", "name": parts[0]})
+    if r.get("error"):
+        return "no such note — `.note list` to see all"
+    return f"📝 {parts[0].lower()}:\n{(r.get('body') or '')[:3000]}"

@@ -223,7 +223,7 @@ HELP = ("userbot cmds: `.mission <goal>` `.tick` `.send <chat> <msg>` "
         "`.bond [chat] [0-3|auto]` `.memory [chat]` `.import <chat>` `.help`")
 
 
-async def run_owner_cmd(cmd: str, arg: str) -> str:
+async def run_owner_cmd(cmd: str, arg: str, chat: str = "me") -> str:
     """Owner commands: .import needs the live client, rest via shared core."""
     if cmd == "import":
         if BRIDGE_CLIENT is None:
@@ -257,7 +257,7 @@ async def run_owner_cmd(cmd: str, arg: str) -> str:
         head = f"imported {r.get('imported', 0)} msgs, learned {len(facts)} facts"
         return head if not facts else head + ": " + ", ".join(facts[:12])
     from bridges.owner import run_owner_command
-    return await run_owner_command(api, "telegram", cmd, arg)
+    return await run_owner_command(api, "telegram", cmd, arg, chat)
 
 
 # ---------- message handling (pure logic — unit-tested with fake events) ----------
@@ -268,7 +268,8 @@ async def handle_owner_message(event) -> str | None:
         return None
     cmd, _, arg = text[len(PREFIX):].partition(" ")
     try:
-        out = await run_owner_cmd(cmd.lower(), arg.strip())
+        chat = str(getattr(event, "chat_id", "me") or "me")
+        out = await run_owner_cmd(cmd.lower(), arg.strip(), chat)
     except Exception as e:
         out = f"owner cmd failed: {e}"
     await event.reply(out[:4000])

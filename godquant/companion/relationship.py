@@ -99,6 +99,45 @@ FRICTION_HALFLIFE_H = 1.0  # friction halves every hour of quiet
 SCORE_DECAY_DAY = 0.90    # score ×0.9 per silent day
 
 
+_MIND_SCHEMA = """
+CREATE TABLE IF NOT EXISTS reminders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  due_ts REAL NOT NULL,
+  repeat TEXT DEFAULT '',
+  done INTEGER DEFAULT 0,
+  created_ts REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS intentions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  text TEXT NOT NULL,
+  kind TEXT DEFAULT 'custom',
+  channel TEXT DEFAULT '',
+  chat_id TEXT DEFAULT '',
+  display TEXT DEFAULT '',
+  status TEXT DEFAULT 'active',
+  created_ts REAL NOT NULL,
+  updated_ts REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS journal (
+  channel TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  day TEXT NOT NULL,
+  entry TEXT NOT NULL,
+  created_ts REAL NOT NULL,
+  PRIMARY KEY (channel, chat_id, day)
+);
+CREATE TABLE IF NOT EXISTS notes (
+  name TEXT PRIMARY KEY,
+  body TEXT NOT NULL,
+  updated_ts REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+"""
+
+
 def parse_bond_id(bond_id: str) -> tuple[str, str]:
     if ":" in bond_id:
         ch, _, rest = bond_id.partition(":")
@@ -236,7 +275,7 @@ class BondStore:
                                      timeout=30)
         self._lock = threading.Lock()
         with self._lock:
-            self._conn.executescript(_SCHEMA + _FACTS_SCHEMA + _PERSONA_SCHEMA)
+            self._conn.executescript(_SCHEMA + _FACTS_SCHEMA + _PERSONA_SCHEMA + _MIND_SCHEMA)
             have = {r[1] for r in self._conn.execute(
                 "PRAGMA table_info(bonds)").fetchall()}
             for col, ddl in _NEW_COLS.items():
@@ -475,4 +514,180 @@ class BondStore:
                 "UPDATE bonds SET score=0, friction=0, level=0, manual=0,"
                 " streak=0, burst=0 WHERE channel=? AND chat_id=?",
                 (channel, chat_id))
+            self._conn.commit()
+
+    # ---- autonomous mind: reminders / intentions / journal / notes / kv ----
+    def add_reminder(self, channel: str, chat_id: str, text: str,
+                     due_ts: float, repeat: str = "") -> int:
+        import time as _t
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO reminders(channel,chat_id,text,due_ts,repeat,"
+                "created_ts) VALUES(?,?,?,?,?,?)",
+                (channel, str(chat_id), text.strip(), due_ts, repeat, _t.time()))
+            self._conn.commit()
+            return int(cur.lastrowid)
+
+    def due_reminders(self, now: float) -> list[dict]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT id,channel,chat_id,text,repeat,due_ts FROM reminders "
+                "WHERE done=0 AND due_ts<=? ORDER BY due_ts", (now,))
+            return [{"id": r[0], "channel": r[1], "chat_id": r[2],
+                     "text": r[3], "repeat": r[4], "due_ts": r[5]}
+                    for r in cur.fetchall()]
+
+    def fire_reminder(self, rid: int, now: float):
+        """Mark fired; daily repeats roll to the next future slot."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT due_ts,repeat FROM reminders WHERE id=?", (rid,))
+            r = cur.fetchone()
+            if not r:
+                return
+            if r[1] == "daily":
+                due = r[0]
+                while due <= now:
+                    due += 86400
+                self._conn.execute(
+                    "UPDATE reminders SET due_ts=? WHERE id=?", (due, rid))
+            else:
+                self._conn.execute(
+                    "UPDATE reminders SET done=1 WHERE id=?", (rid,))
+            self._conn.commit()
+
+    def list_reminders(self, active_only: bool = True) -> list[dict]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT id,channel,chat_id,text,repeat,due_ts,done FROM reminders "
+                + ("WHERE done=0 " if active_only else "") + "ORDER BY due_ts")
+            return [{"id": r[0], "channel": r[1], "chat_id": r[2],
+                     "text": r[3], "repeat": r[4], "due_ts": r[5],
+                     "done": bool(r[6])} for r in cur.fetchall()]
+
+    def cancel_reminder(self, rid: int) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM reminders WHERE id=?", (rid,))
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def add_intention(self, text: str, kind: str = "custom",
+                      channel: str = "", chat_id: str = "",
+                      display: str = "") -> int:
+        import time as _t
+        now = _t.time()
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO intentions(text,kind,channel,chat_id,display,"
+                "status,created_ts,updated_ts) VALUES(?,?,?,?,?,?,?,?)",
+                (text.strip(), kind, channel, str(chat_id), display,
+                 "active", now, now))
+            self._conn.commit()
+            return int(cur.lastrowid)
+
+    def active_intentions(self) -> list[dict]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT id,text,kind,channel,chat_id,display,created_ts "
+                "FROM intentions WHERE status='active' ORDER BY id")
+            return [{"id": r[0], "text": r[1], "kind": r[2], "channel": r[3],
+                     "chat_id": r[4], "display": r[5], "created_ts": r[6]}
+                    for r in cur.fetchall()]
+
+    def resolve_intention(self, iid: int, status: str = "done") -> bool:
+        import time as _t
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE intentions SET status=?,updated_ts=? "
+                "WHERE id=? AND status='active'", (status, _t.time(), iid))
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def save_journal(self, channel: str, chat_id: str, day: str, entry: str):
+        import time as _t
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO journal(channel,chat_id,day,entry,"
+                "created_ts) VALUES(?,?,?,?,?)",
+                (channel, str(chat_id), day, entry, _t.time()))
+            self._conn.commit()
+
+    def get_journal(self, channel: str, chat_id: str,
+                    limit: int = 7) -> list[tuple[str, str]]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT day,entry FROM journal WHERE channel=? AND chat_id=? "
+                "ORDER BY day DESC LIMIT ?", (channel, str(chat_id), limit))
+            return [(r[0], r[1]) for r in cur.fetchall()]
+
+    def recent_journal(self, limit: int = 10) -> list[tuple]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT channel,chat_id,day,entry FROM journal "
+                "ORDER BY day DESC LIMIT ?", (limit,))
+            return [(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
+
+    def save_note(self, name: str, body: str):
+        import time as _t
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO notes(name,body,updated_ts) VALUES(?,?,?)",
+                (name.strip().lower(), body.strip(), _t.time()))
+            self._conn.commit()
+
+    def get_note(self, name: str) -> str | None:
+        with self._lock:
+            cur = self._conn.execute("SELECT body FROM notes WHERE name=?",
+                                     (name.strip().lower(),))
+            r = cur.fetchone()
+            return r[0] if r else None
+
+    def list_notes(self) -> list[str]:
+        with self._lock:
+            cur = self._conn.execute("SELECT name FROM notes ORDER BY name")
+            return [r[0] for r in cur.fetchall()]
+
+    def del_note(self, name: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM notes WHERE name=?",
+                                     (name.strip().lower(),))
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def kv_get(self, k: str, default: str = "") -> str:
+        with self._lock:
+            cur = self._conn.execute("SELECT v FROM kv WHERE k=?", (k,))
+            r = cur.fetchone()
+            return r[0] if r else default
+
+    def kv_set(self, k: str, v: str):
+        with self._lock:
+            self._conn.execute("INSERT OR REPLACE INTO kv(k,v) VALUES(?,?)",
+                               (k, v))
+            self._conn.commit()
+
+    def all_bonds(self) -> list[dict]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT channel,chat_id,level,msg_count,score,friction,streak,"
+                "updated FROM bonds ORDER BY channel,chat_id")
+            return [{"channel": r[0], "chat_id": r[1], "level": r[2] or 0,
+                     "msg_count": r[3] or 0, "score": r[4] or 0.0,
+                     "friction": r[5] or 0.0, "streak": r[6] or 0,
+                     "updated": r[7] or 0.0} for r in cur.fetchall()]
+
+    def facts_full(self, channel: str, chat_id: str) -> list[tuple]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT fkey,fvalue,updated FROM bond_facts "
+                "WHERE channel=? AND chat_id=? ORDER BY updated",
+                (channel, str(chat_id)))
+            return [(r[0], r[1], r[2]) for r in cur.fetchall()]
+
+    def clear_key(self, channel: str, chat_id: str, key: str):
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM bond_facts WHERE channel=? AND chat_id=? AND fkey=?",
+                (channel, str(chat_id), key))
             self._conn.commit()

@@ -299,7 +299,7 @@ def test_wa_owner_defines_everything_it_calls():
     builtins = {"if", "for", "while", "switch", "catch", "function", "return",
                 "require", "setTimeout", "parseInt", "console", "process",
                 "setInterval", "Promise", "JSON", "Math", "Date", "isNaN",
-                "Set", "Map", "async", "of", "new", "post"}  # post = injected
+                "Set", "Map", "async", "of", "new", "post", "String"}  # post = injected
     undefined = {c for c in calls - defined - builtins
                  if not c.startswith("_")}
     assert not undefined, f"undefined calls in wa_owner.js: {undefined}"

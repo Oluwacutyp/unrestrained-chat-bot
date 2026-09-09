@@ -205,15 +205,106 @@ class ProactiveEngine:
             return False
         return True
 
+    def _tick_reminders(self, now: float) -> list[dict]:
+        """Fire due reminders into the outbox (alarms bypass quiet hours)."""
+        try:
+            due = self.companion.bonds.due_reminders(now)
+        except Exception as e:
+            log.warning("reminders: %s", e)
+            return []
+        queued = []
+        for r in due:
+            try:
+                mid = self.outbox.enqueue(r["channel"], r["chat_id"],
+                                          f"⏰ {r['text']}")
+                self.companion.bonds.fire_reminder(r["id"], now)
+                queued.append({"id": mid, "channel": r["channel"],
+                               "to": r["chat_id"],
+                               "message": f"⏰ {r['text'][:120]}"})
+            except Exception as e:
+                log.warning("reminder #%d failed: %s", r["id"], e)
+        return queued
+
+    def _tick_dream(self, now: float):
+        from godquant.companion.dream import run_dream
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            if self.companion.bonds.kv_get("last_dream_day") == today:
+                return
+            cmap = {f"{c['channel']}:{c['chat_id']}": c["display"]
+                    for c in self.outbox.list_contacts() if c["display"]}
+            rep = run_dream(self.companion.bonds, cmap, now)
+            log.info("dream: %s", rep)
+        except Exception as e:
+            log.warning("dream failed: %s", e)
+
+    def _tick_brief(self, now: float, queued: list):
+        try:
+            dest = (self.cfg.brief_to or "").strip()
+            if not dest or ":" not in dest:
+                return
+            bh = self.cfg.brief_hour
+            if datetime.now().hour < (7 if bh is None else bh):
+                return
+            today = datetime.now().strftime("%Y-%m-%d")
+            if self.companion.bonds.kv_get("brief_day") == today:
+                return
+            from godquant.companion.dream import build_brief
+            ch, _, cid = dest.partition(":")
+            pend = self.outbox.stats()["outbox"].get("pending", 0)
+            mid = self.outbox.enqueue(
+                ch, cid, build_brief(self.companion.bonds, pend, now))
+            self.companion.bonds.kv_set("brief_day", today)
+            queued.append({"id": mid, "channel": ch, "to": cid,
+                           "message": "☀️ brief"})
+        except Exception as e:
+            log.warning("brief failed: %s", e)
+
+    def _tick_intentions(self, now: float) -> list[dict]:
+        """Act on one targeted intention per tick (custom ones: owner pulls)."""
+        if _in_quiet(self.cfg.quiet_hours):
+            return []
+        try:
+            items = self.companion.bonds.active_intentions()
+        except Exception as e:
+            log.warning("intentions: %s", e)
+            return []
+        for it in items:
+            if not it["channel"] or not it["chat_id"]:
+                continue
+            try:
+                cid = f"{it['channel']}:{it['chat_id']}"
+                if it["kind"] == "checkin":
+                    text = self.companion.proactive_opener(
+                        cid, self.cfg.persona, 2 * 86400,
+                        display=it["display"] or None)
+                else:
+                    r = self.companion.chat(
+                        "[EVENT: pursue this intention in character, "
+                        f"one short message: {it['text']}]",
+                        cid, persona=self.cfg.persona, bond_id=cid)
+                    text = (r.get("response") or it["text"]).strip()
+                mid = self.outbox.enqueue(it["channel"], it["chat_id"], text)
+                self.companion.bonds.resolve_intention(it["id"])
+                log.info("intention #%d acted → %s", it["id"], cid)
+                return [{"id": mid, "channel": it["channel"], "to": it["chat_id"],
+                         "message": text[:120]}]
+            except Exception as e:
+                log.warning("intention #%d failed: %s", it["id"], e)
+        return []
+
     def tick(self) -> list[dict]:
         """One proactive pass. Returns queued messages. DMs only, never groups."""
         now = time.time()
+        queued = self._tick_reminders(now)
+        self._tick_dream(now)
+        self._tick_brief(now, queued)
+        queued += self._tick_intentions(now)
         with self.outbox._lock:
             rows = self.outbox._conn.execute(
                 "SELECT channel,chat_id,display,enabled,quiet,max_nudges,"
                 "nudges_today,day,last_inbound,last_outbound FROM contacts "
                 "WHERE enabled=1").fetchall()
-        queued = []
         for row in rows:
             channel, chat_id = row[0], row[1]
             if self._is_group(channel, chat_id):

@@ -51,6 +51,12 @@ One brain, two bridges — both **reply and deliver**, so the bot texts first:
 | `bridges/whatsapp.js` (Node, QR login) | ✅ DMs + groups | ✅ via outbox poll | **PC** (needs Chrome) |
 | `bridges/telegram_userbot.py` (MTProto, **your own account**) | ✅ DMs + groups | ✅ via outbox poll | **Termux ✅** |
 
+v3.7 autonomous mind: **reminders that fire** (`.remind in 2h call mom`,
+repeating, survive restarts), a nightly **dream cycle** (memory
+conflict-repair, per-relationship journaling, self-set check-in intentions),
+an **intentions engine** (`.mind`, `.want`), **morning briefings**, **notes**
+(`.note`), agent web reading (`.fetch`), and a proof test that facts never
+leak across chats.
 v3.6 command deck: **one owner-command core on every platform** (Telegram,
 WhatsApp classic + Baileys, Discord) — per-chat `.persona`, `.bond`, `.memory`,
 `.forget`, `.models`/`.model` runtime LLM switching, `.stats`, `.mission`,

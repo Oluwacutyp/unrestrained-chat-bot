@@ -25,6 +25,9 @@ API is backward compatible with whatsapp.js:
   POST /forget {channel, chat_id, deep?} → wipe dossier (+bond)
   POST /code {task, run?}  → agent writes code to workspace (audited)
   POST /exec {cmd}         → shell (needs GQ_ALLOW_EXEC=1) ⚠️
+  POST /remind {action,text,due_ts..} → reminders that fire via outbox
+  POST /want {text..} + GET|POST /mind → intentions engine
+  GET  /journal /brief + POST /dream /note /fetch → memory + briefing
 GET / serves the single-file chat UI (mobile-first, Termux-friendly).
 """
 from __future__ import annotations
@@ -161,6 +164,36 @@ class _Handler(BaseHTTPRequestHandler):
                 ovs = companion.bonds.list_personas()
             return self._json({"default": cfg.persona,
                                "overrides": [f"{c}:{i}:{p}" for c, i, p in ovs]})
+        if parsed.path == "/mind":
+            with self.lock:
+                try:
+                    import json as _js
+                    dream = _js.loads(
+                        companion.bonds.kv_get("dream_report", "") or "{}")
+                except ValueError:
+                    dream = {}
+                mind = {"intentions": companion.bonds.active_intentions(),
+                        "reminders": companion.bonds.list_reminders(),
+                        "dream": dream, "stats": memory.stats()}
+            return self._json(mind)
+        if parsed.path == "/journal":
+            with self.lock:
+                if q.get("recent", [""])[0]:
+                    es = companion.bonds.recent_journal(
+                        int(q.get("recent", ["10"])[0] or 10))
+                    out = [{"channel": c, "chat_id": i, "day": d, "entry": e}
+                           for c, i, d, e in es]
+                else:
+                    es = companion.bonds.get_journal(
+                        q.get("channel", [""])[0], q.get("chat_id", [""])[0],
+                        int(q.get("limit", ["7"])[0] or 7))
+                    out = [{"day": d, "entry": e} for d, e in es]
+            return self._json({"entries": out})
+        if parsed.path == "/brief":
+            from godquant.companion.dream import build_brief
+            with self.lock:
+                pend = self.engine.outbox.stats()["outbox"].get("pending", 0)
+                return self._json({"brief": build_brief(companion.bonds, pend)})
         if parsed.path == "/mood":
             with self.lock:
                 return self._json(companion.moods.snapshot(cid))
@@ -363,6 +396,95 @@ class _Handler(BaseHTTPRequestHandler):
                     return self._json({"exit": p.returncode, "output": out})
                 except _sp.TimeoutExpired:
                     return self._json({"exit": -1, "output": "TIMEOUT"})
+            if path == "/remind":
+                b = companion.bonds
+                act = (data.get("action") or "add").lower()
+                if act == "add":
+                    if not data.get("text") or not data.get("due_ts"):
+                        return self._json({"error": "need {text, due_ts}"}, 400)
+                    with self.lock:
+                        rid = b.add_reminder(
+                            data.get("channel", ""), str(data.get("chat_id", "")),
+                            data["text"], float(data["due_ts"]),
+                            data.get("repeat", ""))
+                    return self._json({"id": rid, "due_ts": float(data["due_ts"])})
+                if act == "list":
+                    with self.lock:
+                        rs = b.list_reminders()
+                    ch, cid = data.get("channel"), data.get("chat_id")
+                    if ch or cid:
+                        rs = [r for r in rs
+                              if (not ch or r["channel"] == ch)
+                              and (not cid or r["chat_id"] == str(cid))]
+                    return self._json({"reminders": rs})
+                if act == "cancel":
+                    with self.lock:
+                        ok = b.cancel_reminder(int(data.get("id", 0)))
+                    return self._json({"cancelled": ok})
+                return self._json({"error": "action: add|list|cancel"}, 400)
+            if path == "/want":
+                if not (data.get("text") or "").strip():
+                    return self._json({"error": "need {text}"}, 400)
+                with self.lock:
+                    iid = companion.bonds.add_intention(
+                        data["text"], data.get("kind", "custom"),
+                        data.get("channel", ""), str(data.get("chat_id", "")),
+                        data.get("display", ""))
+                return self._json({"id": iid})
+            if path == "/mind":
+                if (data.get("action") or "") not in ("done", "drop"):
+                    return self._json({"error": "action: done|drop"}, 400)
+                with self.lock:
+                    ok = companion.bonds.resolve_intention(
+                        int(data.get("id", 0)), data["action"])
+                return self._json({"ok": ok})
+            if path == "/note":
+                b = companion.bonds
+                act = (data.get("action") or "get").lower()
+                name = (data.get("name") or "").strip()
+                if act == "save" and name and data.get("body") is not None:
+                    with self.lock:
+                        b.save_note(name, data["body"])
+                    return self._json({"saved": name.lower()})
+                if act == "get" and name:
+                    with self.lock:
+                        body = b.get_note(name)
+                    return self._json({"body": body} if body is not None
+                                      else {"error": "no such note"})
+                if act == "list":
+                    with self.lock:
+                        return self._json({"notes": b.list_notes()})
+                if act == "del" and name:
+                    with self.lock:
+                        return self._json({"deleted": b.del_note(name)})
+                return self._json({"error": "action: save|get|list|del"}, 400)
+            if path == "/dream":
+                from godquant.companion.dream import run_dream
+                with self.lock:
+                    cmap = {f"{c['channel']}:{c['chat_id']}": c["display"]
+                            for c in self.engine.outbox.list_contacts()
+                            if c["display"]}
+                    return self._json(run_dream(companion.bonds, cmap))
+            if path == "/fetch":
+                import re as _re
+                import urllib.request as _url
+                url = (data.get("url") or "").strip()
+                if not url.startswith(("http://", "https://", "file://")):
+                    return self._json({"error": "need http(s) or file url"}, 400)
+                try:
+                    req = _url.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                    with _url.urlopen(req, timeout=15) as r:
+                        html = r.read()[:200000].decode("utf-8", "replace")
+                    m = _re.search(r"<title[^>]*>(.*?)</title>", html,
+                                   _re.I | _re.S)
+                    title = _re.sub(r"\s+", " ", m.group(1)).strip()[:200] if m else ""
+                    text = _re.sub(r"<script.*?</script>|<style.*?</style>", " ",
+                                   html, flags=_re.I | _re.S)
+                    text = _re.sub(r"<[^>]+>", " ", text)
+                    text = _re.sub(r"\s+", " ", text).strip()[:2000]
+                    return self._json({"ok": True, "title": title, "text": text})
+                except Exception as e:
+                    return self._json({"error": f"fetch failed: {e}"}, 502)
             if path == "/warn":
                 msg = (data.get("message") or "").strip()[:500]
                 if not msg:
